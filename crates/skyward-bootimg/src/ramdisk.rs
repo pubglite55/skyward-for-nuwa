@@ -40,6 +40,11 @@ impl Entry {
     pub fn is_dir(&self) -> bool {
         self.mode & S_IFMT == S_IFDIR
     }
+
+    /// Whether this entry is a link.
+    pub fn is_link(&self) -> bool {
+        self.mode & S_IFMT == S_IFLNK
+    }
 }
 
 /// An initramfs held in memory, so entries keep their owners, modes and
@@ -155,6 +160,11 @@ impl Ramdisk {
     /// Add a root-owned regular file, creating missing parent directories.
     pub fn add(&mut self, name: &str, mode: u32, data: Vec<u8>) -> Result<()> {
         self.insert(name, S_IFREG | mode, data)
+    }
+
+    /// Take an entry out of the ramdisk, if it is there.
+    pub fn remove(&mut self, name: &str) {
+        self.entries.retain(|e| e.name != name);
     }
 
     /// Point `name` to `target`: a link already there is pointed anew, and

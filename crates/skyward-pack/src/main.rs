@@ -130,6 +130,12 @@ fn main() -> Result<()> {
             // until it points here; the recovery binary is each of them.
             let (_, recovery) = paths::RECOVERY.rsplit_once('/').expect("the recovery binary is in a folder");
             for command in paths::COMMANDS {
+                // A base that is not stock, as a TWRP, carries programs of
+                // its own under these names; Skyward's take their place as
+                // the links the stock base has.
+                if rd.find(command).is_some_and(|e| !e.is_link()) {
+                    rd.remove(command);
+                }
                 rd.link(command, recovery)?;
             }
             rd.add(paths::SYSTEM_INIT, 0o755, read(&system_init)?)?;
