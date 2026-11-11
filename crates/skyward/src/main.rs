@@ -709,23 +709,6 @@ fn adopt_installed_version(props: &std::collections::HashMap<String, String>, cf
     }
     Ok(())
 }
-    let release = cfg
-        .device
-        .build_release
-        .as_deref()
-        .or_else(|| props.get("ro.build.version.release").map(String::as_str))
-        .and_then(build_version);
-    let patch = cfg
-        .device
-        .build_patch
-        .as_deref()
-        .or_else(|| props.get("ro.build.version.security_patch").map(String::as_str))
-        .and_then(patch_level);
-    if let (Some(version), Some(patch)) = (release, patch) {
-        skyward_crypto::keymint::set_renewal_versions(version, patch);
-    }
-    Ok(())
-}
 
 /// The build version as Android numbers builds: 16 is 160000.
 #[cfg(target_os = "android")]
