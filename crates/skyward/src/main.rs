@@ -490,7 +490,7 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     let nodes = skyward_sys::ueventd::apply()?;
     skyward_sys::kmsg(&format!("{nodes} device nodes given the owner their phone describes"))?;
     let props = skyward_info::installed_props(slot)?;
-    adopt_installed_version(&props)?;
+    adopt_installed_version(&props, &cfg)?;
     // Without logd the phone's own programs still run, and only what they
     // log is lost, so why it did not start goes to the kernel log.
     if let Some(logd) = &cfg.logd {
@@ -665,7 +665,7 @@ const BUILD_VERSION: [&str; 3] = ["ro.build.version.release", "ro.build.version.
 /// run of the recovery service may have set it already, and init sets such
 /// a property only once.
 #[cfg(target_os = "android")]
-fn adopt_installed_version(props: &std::collections::HashMap<String, String>) -> Result<()> {
+fn adopt_installed_version(props: &std::collections::HashMap<String, String>, cfg: &skyward_config::DeviceConfig) -> Result<()> {
     for name in BUILD_VERSION {
         let value = props.get(name).with_context(|| format!("the installed system says no {name}"))?;
         if skyward_sys::prop(name).as_ref() != Some(value) {
@@ -673,13 +673,38 @@ fn adopt_installed_version(props: &std::collections::HashMap<String, String>) ->
         }
         skyward_sys::kmsg(&format!("{name} is the installed system's {value}"))?;
     }
+    // A phone whose keys were made by a newer build than the one installed
+    // gets the newest build the configuration names instead: a key is
+    // never upgraded backwards, and the secure world judges a key by the
+    // build it is asked to renew it for.
+    if let Some(release) = &cfg.device.build_release {
+        if skyward_sys::prop("ro.build.version.release").as_ref() != Some(release) {
+            skyward_sys::set_prop("ro.build.version.release", release)?;
+        }
+        skyward_sys::kmsg(&format!("ro.build.version.release is kept at the configuration's {release}"))?;
+    }
+    if let Some(patch) = &cfg.device.build_patch {
+        if skyward_sys::prop("ro.build.version.security_patch").as_ref() != Some(patch) {
+            skyward_sys::set_prop("ro.build.version.security_patch", patch)?;
+        }
+        skyward_sys::kmsg(&format!("ro.build.version.security_patch is kept at the configuration's {patch}"))?;
+    }
     // A key the secure world will not use as it is gets renewed for the
     // build running now, and the renewal names that build the way the
     // phone's own key broker does.
-    if let (Some(version), Some(patch)) = (
-        props.get("ro.build.version.release").and_then(|release| build_version(release)),
-        props.get("ro.build.version.security_patch").and_then(|patch| patch_level(patch)),
-    ) {
+    let release = cfg
+        .device
+        .build_release
+        .as_deref()
+        .or_else(|| props.get("ro.build.version.release").map(String::as_str))
+        .and_then(build_version);
+    let patch = cfg
+        .device
+        .build_patch
+        .as_deref()
+        .or_else(|| props.get("ro.build.version.security_patch").map(String::as_str))
+        .and_then(patch_level);
+    if let (Some(version), Some(patch)) = (release, patch) {
         skyward_crypto::keymint::set_renewal_versions(version, patch);
     }
     Ok(())

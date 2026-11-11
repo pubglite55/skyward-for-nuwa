@@ -271,6 +271,16 @@ pub struct Device {
     /// System property that carries the vendor OS version.
     #[serde(default = "default_os_version_prop")]
     pub os_version_prop: String,
+    /// The build version to report to the secure world instead of the
+    /// installed system's, where the keys on the phone were made by a
+    /// newer system than the one installed: a key is never upgraded
+    /// backwards, so the recovery speaks for the newest build the phone
+    /// has seen, as a TWRP build does with its own properties.
+    #[serde(default)]
+    pub build_release: Option<String>,
+    /// The patch level to report beside it, in year and month.
+    #[serde(default)]
+    pub build_patch: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -5,6 +5,11 @@ model = "Xiaomi 13 Pro"
 ab = true
 soc = { hans = "第二代骁龙®8移动平台", hant = "Snapdragon® 8 Gen 2 行動平台", en = "Snapdragon® 8 Gen 2 Mobile Platform" }
 os_version_prop = "ro.mi.os.version.incremental"
+# The keys this phone's data was made with came from a HyperOS 4 build
+# whose patch level is 2099-12-31; a key is never upgraded backwards, so
+# the recovery speaks for that build, as the TWRP builds of this phone do.
+build_release = "17"
+build_patch = "2099-12-31"
 
 [display]
 # The panel's own mode in the device tree: the m2 panels are 1440 by 3200.
