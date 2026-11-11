@@ -58,6 +58,8 @@ pub fn set_renewal_versions(version: u32, patch: u32) {
 }
 
 const PURPOSE_DECRYPT: i32 = 1;
+const ALGORITHM_AES: i32 = 32;
+const KEY_BITS: i32 = 256;
 const BLOCK_MODE_GCM: i32 = 32;
 const PADDING_NONE: i32 = 1;
 
@@ -67,6 +69,8 @@ const TAG_PURPOSE: i32 = 536_870_913;
 const TAG_BLOCK_MODE: i32 = 536_870_916;
 const TAG_PADDING: i32 = 536_870_918;
 const TAG_MAC_LENGTH: i32 = 805_307_371;
+const TAG_ALGORITHM: i32 = 536_870_914;
+const TAG_KEY_SIZE: i32 = 805_306_371;
 const TAG_APPLICATION_ID: i32 = -1_879_047_591;
 const TAG_NONCE: i32 = -1_879_047_191;
 /// The build the key belongs to and its patch level, as the phone's own
@@ -75,6 +79,7 @@ const TAG_OS_VERSION: i32 = 805_307_073;
 const TAG_OS_PATCHLEVEL: i32 = 805_307_074;
 
 /// Which arm of a parameter's value is used.
+const VALUE_ALGORITHM: i32 = 1;
 const VALUE_PADDING_MODE: i32 = 3;
 const VALUE_KEY_PURPOSE: i32 = 7;
 const VALUE_INTEGER: i32 = 11;
@@ -279,7 +284,12 @@ impl<'a> KeyMint<'a> {
     /// named at all, so naming an empty one leaves it unable to unwrap a
     /// key that was made bound to nothing.
     fn gcm_params(call: &mut Parcel, app_id: &[u8], nonce: &[u8]) {
-        call.i32(if app_id.is_empty() { 5 } else { 6 });
+        call.i32(if app_id.is_empty() { 7 } else { 8 });
+        // The key's algorithm and size are part of what an operation is
+        // checked against, as the phone's own vold gives them: a secure
+        // world that does not find them refuses the operation.
+        parameter(call, TAG_ALGORITHM, Value::Enum(VALUE_ALGORITHM, ALGORITHM_AES));
+        parameter(call, TAG_KEY_SIZE, Value::Integer(KEY_BITS));
         parameter(call, TAG_BLOCK_MODE, Value::Enum(VALUE_BLOCK_MODE, BLOCK_MODE_GCM));
         parameter(call, TAG_PADDING, Value::Enum(VALUE_PADDING_MODE, PADDING_NONE));
         parameter(call, TAG_MAC_LENGTH, Value::Integer(128));
