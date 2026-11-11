@@ -343,14 +343,18 @@ impl<'a> KeyMint<'a> {
     /// way.
     fn upgrade_retrying(&self, key_blob: &[u8], params: impl Fn(&mut Parcel)) -> Result<Vec<u8>> {
         let mut refusals = Vec::new();
-        if let Some((version, patch)) = RENEWAL_VERSIONS.get() {
-            match self.upgrade(key_blob, |call| {
+        // What the key was bound to, and the build the installed system is
+        // beside it: the parameters the broker sends, and the ones a key
+        // needs to be decrypted, in one call.
+        match self.upgrade(key_blob, |call| {
+            params(call);
+            if let Some((version, patch)) = RENEWAL_VERSIONS.get() {
                 parameter(call, TAG_OS_VERSION, Value::Integer(*version as i32));
                 parameter(call, TAG_OS_PATCHLEVEL, Value::Integer(*patch as i32));
-            }) {
-                Ok(key) => return Ok(key),
-                Err(e) => refusals.push(e),
             }
+        }) {
+            Ok(key) => return Ok(key),
+            Err(e) => refusals.push(e),
         }
         match self.upgrade(key_blob, &params) {
             Ok(key) => return Ok(key),
