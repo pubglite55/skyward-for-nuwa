@@ -53,7 +53,13 @@ impl Ramdisk {
     /// boot images carry.
     pub fn decode(compressed: &[u8]) -> Result<Self> {
         let mut cpio = Vec::new();
-        lz4_flex::frame::FrameDecoder::new(compressed).read_to_end(&mut cpio).context("lz4 decode")?;
+        if compressed.starts_with(&LZ4_LEGACY_MAGIC.to_le_bytes()) {
+            // A ramdisk in the framing the kernel's own unpacker reads, as
+            // the TWRP an update package carries keeps it.
+            cpio = lz4_legacy_decode(compressed)?;
+        } else {
+            lz4_flex::frame::FrameDecoder::new(compressed).read_to_end(&mut cpio).context("lz4 decode")?;
+        }
         let mut entries = Vec::new();
         let mut rest = Cursor::new(cpio.as_slice());
         loop {
@@ -273,6 +279,26 @@ pub fn lz4_legacy(input: &[u8]) -> Vec<u8> {
         out.extend_from_slice(&block);
     }
     out
+}
+
+/// Unpack LZ4's legacy framing: the magic number, then each block with its
+/// compressed length before it. A block carries no length of its own, so
+/// each is unpacked into the room one block takes.
+fn lz4_legacy_decode(compressed: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut rest = &compressed[4..];
+    let mut block = vec![0u8; LZ4_LEGACY_BLOCK * 2];
+    while rest.len() >= 4 {
+        let len = u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]) as usize;
+        rest = &rest[4..];
+        if len == 0 || len > rest.len() {
+            break;
+        }
+        let written = lz4_flex::block::decompress_into(&rest[..len], &mut block).context("lz4 decode")?;
+        out.extend_from_slice(&block[..written]);
+        rest = &rest[len..];
+    }
+    Ok(out)
 }
 
 fn lz4_tool(input: &[u8]) -> Result<Vec<u8>> {
