@@ -28,9 +28,11 @@ jobs:
       - name: Build the recovery service and the packer
         run: |
           cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward
+          cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward-system-init --target-dir target/system-init
           cargo build --locked --release -p skyward-pack
           mkdir tools
           cp target/aarch64-linux-android/release/skyward target/release/skyward-pack tools/
+          cp target/system-init/aarch64-linux-android/release/system-init tools/
       - name: Ask which stock build the recovery is made on
         id: stock
         run: tools/skyward-pack stock --config devices/nuwa.toml >> "$GITHUB_OUTPUT"
@@ -46,7 +48,7 @@ jobs:
         run: |
           name="skyward-nuwa-${GITHUB_REF_NAME#nuwa-}-$VERSION"
           mkdir out
-          tools/skyward-pack recovery --stock stock/recovery.img --binary tools/skyward --config devices/nuwa.toml \
+          tools/skyward-pack recovery --stock stock/recovery.img --binary tools/skyward --system-init tools/system-init --config devices/nuwa.toml \
             --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
             --mono-license resources/fonts/KirkMono-OFL.txt --out "out/$name.img"
           (cd out && zip -9 "$name.zip" "$name.img")
