@@ -35,6 +35,21 @@ const NONCE_BYTES: usize = 12;
 /// the phone's own firmware and has to be renewed before it will be used.
 const KEY_REQUIRES_UPGRADE: i32 = -62;
 
+/// The key service's way of saying it does not do what was asked of it --
+/// here, that it cannot renew a key made by a newer secure world.
+const UNIMPLEMENTED: i32 = -38;
+
+/// What generation of the key format a blob came in: the AIDL envelope
+/// starts with the marker KMKD and the version right behind it, and a
+/// secure world older than that version cannot renew the key.
+fn key_generation(blob: &[u8]) -> Option<u32> {
+    if blob.get(2..6)? != b"KMKD" {
+        return None;
+    }
+    let b = blob.get(7..11)?;
+    Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+}
+
 const PURPOSE_DECRYPT: i32 = 1;
 const BLOCK_MODE_GCM: i32 = 32;
 const PADDING_NONE: i32 = 1;
@@ -159,7 +174,13 @@ impl<'a> KeyMint<'a> {
                 // firmware running now, as Android's keystore2 renews one
                 // for vold, and the one on disk is left as it is. A storage
                 // key is bound to nothing that has to be given again.
-                let renewed = self.upgrade(key, |call| call.i32(0)).context("renew the storage key for the firmware running now")?;
+                let renewed =
+                    self.upgrade_retrying(key, |call| call.i32(0)).with_context(|| match key_generation(key) {
+                        Some(gen) => format!(
+                            "renew the storage key for the firmware running now: it was made by key format generation {gen}, and this secure world cannot renew it"
+                        ),
+                        None => "renew the storage key for the firmware running now".to_string(),
+                    })?;
                 self.convert(&renewed)
             }
             converted => converted,
@@ -221,8 +242,13 @@ impl<'a> KeyMint<'a> {
                 // now; the one on disk is left as it is, so nothing of the
                 // phone's own is changed by reading it here.
                 let renewed = self
-                    .upgrade(key_blob, |call| Self::gcm_params(call, app_id, nonce))
-                    .context("renew the key for the firmware running now")?;
+                    .upgrade_retrying(key_blob, |call| Self::gcm_params(call, app_id, nonce))
+                    .with_context(|| match key_generation(key_blob) {
+                        Some(gen) => format!(
+                            "renew the key for the firmware running now: it was made by key format generation {gen}, and this secure world cannot renew it -- a system whose secure world is at least that new opens it"
+                        ),
+                        None => "renew the key for the firmware running now".to_string(),
+                    })?;
                 self.begin(&renewed, app_id, nonce, note)?
             }
             Err(e) => return Err(e),
@@ -288,7 +314,7 @@ impl<'a> KeyMint<'a> {
     /// A key for the firmware running now, from one made under an older
     /// build. What it is bound to has to be given again, as `params` write
     /// it, or the service cannot tell it is the right key.
-    fn upgrade(&self, key_blob: &[u8], params: impl FnOnce(&mut Parcel)) -> Result<Vec<u8>> {
+    fn upgrade(&self, key_blob: &[u8], params: impl Fn(&mut Parcel)) -> Result<Vec<u8>> {
         let mut call = Parcel::call(DEVICE);
         call.blob(key_blob);
         params(&mut call);
@@ -296,6 +322,17 @@ impl<'a> KeyMint<'a> {
         let mut read = reply.read();
         status::ok(&mut read).context("renew the key")?;
         read.blob().context("read the renewed key")
+    }
+
+    /// The renewal, tried again without the parameters when the service
+    /// would not take them: some secure worlds refuse the parameters
+    /// rather than the renewal, and what the blob itself binds still
+    /// holds. A key made by a newer secure world is refused either way.
+    fn upgrade_retrying(&self, key_blob: &[u8], params: impl Fn(&mut Parcel)) -> Result<Vec<u8>> {
+        match self.upgrade(key_blob, &params) {
+            Err(e) if status::refused_with(&e) == Some(UNIMPLEMENTED) => self.upgrade(key_blob, |_| {}),
+            other => other,
+        }
     }
 
     fn update(&self, operation: &Handle, input: &[u8]) -> Result<Vec<u8>> {
@@ -335,5 +372,23 @@ impl<'a> KeyMint<'a> {
     pub fn usable(&self, key_blob: &[u8], app_id: &[u8]) -> Result<()> {
         let operation = self.begin(key_blob, app_id, &[0; NONCE_BYTES], None)?;
         self.abort(&operation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::key_generation;
+
+    #[test]
+    fn the_generation_of_a_key_blob_is_read_from_its_envelope() {
+        // The first bytes of a key blob the 13 Pro's own storage kept: the
+        // AIDL envelope's marker, then the version, as big-endian words.
+        let blob = [
+            0x85, 0x1a, b'K', b'M', b'K', b'D', 0x1b, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x05, 0x1b,
+        ];
+        assert_eq!(key_generation(&blob), Some(4), "a generation-4 blob says so");
+        assert_eq!(key_generation(&blob[..6]), None, "an envelope cut short before the version names none");
+        let odd = [0x00, 0x00, b'K', b'M', b'K', b'D', 0x1b, 0x00, 0x00, 0x00, 0x03, 0x00];
+        assert_eq!(key_generation(&odd), Some(3), "another generation reads as itself");
     }
 }
