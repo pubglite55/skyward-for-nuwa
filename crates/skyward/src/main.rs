@@ -53,7 +53,7 @@ struct Cli {
 enum Cmd {
     /// Print what the About page shows, plus a partition summary.
     Info {
-        /// Device configuration, e.g. devices/nezha.toml.
+        /// Device configuration, e.g. devices/nuwa.toml.
         #[arg(long)]
         config: String,
     },
@@ -513,9 +513,19 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     for path in load_modules(cfg, &cfg.modules.load)? {
         skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
     }
+    // The drivers have made their nodes and their files by now, and the phone's
+    // own init would give them an owner and permissions here, in its `on boot`
+    // block. A recovery runs no init, so what it leaves is root-only, and the
+    // programs that run as users are left unable to touch the screen. The
+    // phone's own init scripts say who owns what; the recovery reads them.
+    let files = skyward_sys::ueventd::apply_init()?;
+    if files > 0 {
+        skyward_sys::kmsg(&format!("{files} files given the owner and permissions the phone's init gives them"))?;
+    }
+    // The configuration may name what the init scripts do not cover.
     if !cfg.owners.is_empty() {
         let handed = hand_over(&cfg.owners)?;
-        skyward_sys::kmsg(&format!("{handed} of the phone's own files handed to the accounts its init gives them"))?;
+        skyward_sys::kmsg(&format!("{handed} of the files the configuration names handed to the accounts they name"))?;
     }
     let hardware: Vec<String> = services.iter().filter_map(|s| s.ready_hardware_service.clone()).collect();
     if !hardware.is_empty() {

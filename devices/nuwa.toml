@@ -150,3 +150,83 @@ recovery = "04431f150316d32fc5fd38ac8caf7e48ee271fa47cd23a28ad7e067e5fcde273"
 click = 0
 resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
 strength = { lightest = 0.5, strongest = 1.0 }
+
+# The secure stack that opens the data partition: HyperOS 4 (Android 17)
+# ships the gatekeeper as a HIDL that no manifest the recovery reads names,
+# which secure.rs describes itself; with these programs up the data partition
+# opens, by itself where no screen lock is set and behind the credential
+# where one is. Verified on the phone against OS4.0.24.0.XEOCNXM.
+
+# The secure world reaches back into Android through the listeners this
+# daemon registers; without them the key service cannot use any key.
+[[service]]
+path = "/vendor/bin/qseecomd"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_property = "vendor.sys.listeners.registered"
+user = "root"
+groups = ["root", "drmrpc"]
+
+# The key service, the only thing that can use keys the phone wrapped in
+# hardware. Decryption of the data partition needs it.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
+user = "system"
+groups = ["system", "drmrpc"]
+
+# The directory the older HIDL services register with. A recovery carries
+# none of it, so this is the installed system's own program against the
+# installed system's libraries; it reports ready by the property those
+# services wait on.
+[[service]]
+path = "/mnt/system_ext/bin/hwservicemanager"
+libraries = ["/mnt/system/system/lib64/bootstrap", "/mnt/system/system/lib64", "/mnt/system_ext/lib64"]
+ready_property = "hwservicemanager.ready"
+user = "system"
+groups = ["system", "readproc"]
+
+# The credential service: the secure world has it check a screen lock, and
+# it is the only thing that can hand out the note the key service wants
+# before using a key a screen lock guards.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_hardware_service = "android.hardware.gatekeeper@1.0::IGatekeeper/default"
+user = "system"
+groups = ["system"]
+
+# The boot control, which says which slot the bootloader starts next and
+# switches it. It comes last: the phone is usable without it.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.boot@1.2-service"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_hardware_service = "android.hardware.boot@1.2::IBootControl/default"
+user = "root"
+groups = ["root"]
+
+# WLAN: the WCN7850 on PCIe driven by qca_cld3_kiwi_v2 over cnss2. nuwa is
+# the same SoC as ishtar, so the module and firmware paths are expected to
+# match.
+# TODO(nuwa): confirm with
+#   adb shell ls /vendor/lib/modules | grep qca_cld
+#   adb shell ls /vendor/etc/wifi
+
+# The partitions a baseband/EFS backup takes, and what of the data partition
+# a backup leaves out because the secure world keeps it in step with itself.
+[backup]
+efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
+data_skipped = ["vendor/tzstorage", "vendor/qtee", "vendor/mitee", "vendor/goodix", "vendor/fingerprint", "vendor/fpdata", "vendor/misc/mi_fp"]
+
+# Where the phone's own programs keep logs in the data partition.
+[wipe]
+logs = [
+    "/data/miuilog",
+    "/data/vendor/diag",
+    "/data/vendor/bsplog",
+    "/data/vendor/log",
+    "/data/vendor/ramdump",
+    "/data/vendor/ssrdump",
+    "/data/vendor/tombstones",
+    "/data/vendor/wlan_logs",
+]

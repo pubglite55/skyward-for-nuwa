@@ -15,3 +15,7 @@ NOTES.md
 TODO.md
 *.draft.md
 notes/
+
+# Build outputs the packer writes
+stock/
+out/

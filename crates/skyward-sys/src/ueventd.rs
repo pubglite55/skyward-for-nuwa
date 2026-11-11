@@ -136,6 +136,79 @@ pub fn apply() -> anyhow::Result<usize> {
     Ok(changed)
 }
 
+/// The phone's own init scripts. Their `on boot` blocks give an owner and
+/// permissions to what its drivers make: the touchscreen's raw node, the files
+/// its own touch processing reads and writes, the pen. A recovery runs neither
+/// init nor those triggers, and what it creates is root-only, which stops the
+/// programs that run as users.
+pub const INIT_DIRS: [&str; 2] = ["/vendor/etc/init", "/odm/etc/init"];
+
+/// Apply the `chown` and `chmod` lines of those scripts to the files they
+/// name, where those files are there: a trigger may name something this phone
+/// does not have, or something on a partition a recovery has not mounted.
+/// Every line is tried on its own, and one that cannot be applied is passed
+/// over rather than failing the run.
+#[cfg(target_os = "android")]
+pub fn apply_init() -> anyhow::Result<usize> {
+    type Apply = Box<dyn Fn(&CString) -> bool>;
+    use std::ffi::CString;
+    use std::path::Path;
+    let known = accounts(&PASSWD_FILES.iter().chain(GROUP_FILES.iter()).copied().collect::<Vec<_>>());
+    let mut scripts = Vec::new();
+    for dir in INIT_DIRS {
+        scripts_under(Path::new(dir), &mut scripts)?;
+    }
+    let mut changed = 0;
+    for script in scripts {
+        let Ok(text) = std::fs::read_to_string(&script) else { continue };
+        for line in text.lines() {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let (path, apply): (&str, Apply) = match words.as_slice() {
+                ["chown", user, group, path] => {
+                    let (Some(uid), Some(gid)) = (account(&known, user), account(&known, group)) else { continue };
+                    (path, Box::new(move |p| unsafe { libc::chown(p.as_ptr(), uid, gid) } == 0))
+                }
+                ["chmod", mode, path] => {
+                    let Ok(mode) = u32::from_str_radix(mode, 8) else { continue };
+                    (path, Box::new(move |p| unsafe { libc::chmod(p.as_ptr(), mode as libc::mode_t) } == 0))
+                }
+                _ => continue,
+            };
+            if !path.starts_with('/') || std::fs::symlink_metadata(path).is_err() {
+                continue;
+            }
+            let Ok(c_path) = CString::new(path) else { continue };
+            if apply(&c_path) {
+                changed += 1;
+            }
+        }
+    }
+    Ok(changed)
+}
+
+/// Every init script under `dir`, as the scripts of a phone's own programs are
+/// kept one folder deep and sometimes one more.
+#[cfg(target_os = "android")]
+fn scripts_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) -> anyhow::Result<()> {
+    use anyhow::Context;
+    let listing = match std::fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("read {}", dir.display())),
+    };
+    for entry in listing {
+        let entry = entry.with_context(|| format!("read {}", dir.display()))?;
+        let path = entry.path();
+        let kind = entry.file_type().with_context(|| format!("look at {}", path.display()))?;
+        if kind.is_dir() {
+            scripts_under(&path, out)?;
+        } else if path.extension().is_some_and(|e| e == "rc") {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
 /// Every device node under `dir`, which a recovery's /dev holds few enough
 /// of to walk whole.
 #[cfg(target_os = "android")]

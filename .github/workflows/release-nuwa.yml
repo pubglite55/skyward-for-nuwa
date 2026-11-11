@@ -1,0 +1,79 @@
+name: Release nuwa
+
+# The fork's own release: a tag beginning nuwa-v builds the nuwa image
+# alone and publishes it as a release of its own. Upstream's Build
+# workflow keeps releasing every device from a v tag; this one only does
+# anything on the fork's own repository.
+on:
+  push:
+    tags: ["nuwa-v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build and publish nuwa
+    runs-on: ubuntu-24.04
+    if: github.repository == 'pubglite55/skyward-for-nuwa'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Build the recovery service and the packer
+        run: |
+          cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward
+          cargo build --locked --release -p skyward-pack
+          mkdir tools
+          cp target/aarch64-linux-android/release/skyward target/release/skyward-pack tools/
+      - name: Ask which stock build the recovery is made on
+        id: stock
+        run: tools/skyward-pack stock --config devices/nuwa.toml >> "$GITHUB_OUTPUT"
+      - name: Take the recovery partition out of the stock package
+        run: tools/skyward-pack stock --config devices/nuwa.toml --out stock/recovery.img
+      - name: Check the stock recovery
+        env:
+          RECOVERY: ${{ steps.stock.outputs.recovery }}
+        run: echo "$RECOVERY  stock/recovery.img" | sha256sum --check
+      - name: Pack the recovery
+        env:
+          VERSION: ${{ steps.stock.outputs.version }}
+        run: |
+          name="skyward-nuwa-${GITHUB_REF_NAME#nuwa-}-$VERSION"
+          mkdir out
+          tools/skyward-pack recovery --stock stock/recovery.img --binary tools/skyward --config devices/nuwa.toml \
+            --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
+            --mono-license resources/fonts/KirkMono-OFL.txt --out "out/$name.img"
+          (cd out && zip -9 "$name.zip" "$name.img")
+          sha256sum "out/$name.zip" | sed 's|out/||' > SHA256SUMS.txt
+          echo "name=$name" >> "$GITHUB_ENV"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<NOTES
+          # Skyward for nuwa · 小米 13 Pro
+
+          基于 kirklin/skyward 的小米 13 Pro 移植版（commit ${GITHUB_SHA::7}）：
+          /data 解密挂载（HyperOS 4 · Android 17，锁屏凭据路径实测）、息屏 AOD 三样式、口袋防误触。
+
+          ## 刷入（前提：BL 已解锁）
+
+          \`\`\`
+          adb reboot bootloader
+          fastboot flash recovery_a ${name}.img
+          fastboot flash recovery_b ${name}.img
+          \`\`\`
+
+          进入 recovery：关机后按住「电源 + 音量上」，或 adb reboot recovery。
+          刷 recovery 不影响系统与 OTA；回官方 recovery 刷回原厂镜像即可。
+          NOTES
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 \
+            && gh release upload "$GITHUB_REF_NAME" --clobber --repo "$GITHUB_REPOSITORY" "out/$name.zip" "out/SHA256SUMS.txt" \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Skyward for nuwa · Xiaomi 13 Pro" \
+              --notes-file notes.md "out/$name.zip#Xiaomi 13 Pro (nuwa)" SHA256SUMS.txt
