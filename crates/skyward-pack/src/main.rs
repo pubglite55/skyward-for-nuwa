@@ -67,6 +67,11 @@ enum Cmd {
         /// The monospaced typeface's licence, which goes with it.
         #[arg(long)]
         mono_license: PathBuf,
+        /// Build on a recovery that is not the stock one, as a TWRP an
+        /// update package carries: its own tree stays, and Skyward takes
+        /// the place of the recovery program.
+        #[arg(long)]
+        custom_base: bool,
         #[arg(long)]
         out: PathBuf,
     },
@@ -105,14 +110,17 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, out } => {
+        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, custom_base, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
             // A stock recovery ramdisk has no third-party tree; refuse to build
-            // on top of another custom recovery.
-            if let Some(e) = rd.entries.iter().find(|e| e.name == "FFiles" || e.name.starts_with("twres")) {
-                anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
+            // on top of another custom recovery, unless told to: a TWRP base
+            // keeps the userspace that opens the data partition already.
+            if !custom_base {
+                if let Some(e) = rd.entries.iter().find(|e| e.name == "FFiles" || e.name.starts_with("twres")) {
+                    anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
+                }
             }
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
             skyward_config::DeviceConfig::load(&config)?;

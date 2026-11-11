@@ -1,0 +1,40 @@
+name: Build nuwa on the TWRP base
+
+# The TWRP an update package carries keeps the userspace that opens the data
+# partition — keystore2, the service managers, the keymaster libraries and a
+# property file that speaks for the newest build. Skyward takes the place of
+# the recovery program on top of it, to see whether its key calls fare
+# better there than on the stock base.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on the TWRP base
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Build the recovery service, the packer and the second system's first program
+        run: |
+          cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward
+          cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward-system-init --target-dir target/system-init
+          cargo build --locked --release -p skyward-pack
+          mkdir -p tools stock out
+          cp target/aarch64-linux-android/release/skyward target/release/skyward-pack tools/
+          cp target/system-init/aarch64-linux-android/release/system-init tools/
+      - name: Take the TWRP the update package carries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download stock-nuwa-17 -p recovery.img -O stock/recovery.img --clobber
+      - name: Pack it
+        run: |
+          tools/skyward-pack recovery --custom-base --stock stock/recovery.img --binary tools/skyward \
+            --system-init tools/system-init --config devices/nuwa.toml \
+            --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
+            --mono-license resources/fonts/KirkMono-OFL.txt --out out/skyward-nuwa-twrpbase.img
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skyward-nuwa-twrpbase
+          path: out/skyward-nuwa-twrpbase.img
