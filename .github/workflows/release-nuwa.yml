@@ -61,8 +61,9 @@ jobs:
           cat > notes.md <<NOTES
           # Skyward for nuwa · 小米 13 Pro
 
-          基于 kirklin/skyward 的小米 13 Pro 移植版（commit ${GITHUB_SHA::7}）：
-          /data 解密挂载（HyperOS 4 · Android 17，锁屏凭据路径实测）、息屏 AOD 三样式、口袋防误触。
+          基于 kirklin/skyward 0.2.0 的小米 13 Pro 移植版（commit ${GITHUB_SHA::7}）：
+          /data 解密挂载（HyperOS 4 · Android 17，锁屏凭据路径实测）。
+          上游 0.2.0 的功能全部具备：双系统、Skyward 自更新、息屏渐隐与充电界面、按 libmodprobe 加载模块。
 
           ## 刷入（前提：BL 已解锁）
 
