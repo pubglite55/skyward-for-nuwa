@@ -27,7 +27,7 @@ jobs:
       - name: Take the TWRP the update package carries
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download stock-nuwa-17 -p recovery.img -O stock/recovery.img --clobber
+        run: gh release download stock-nuwa-17 -p twrp-nuwa.img -O stock/recovery.img --clobber
       - name: Pack it
         run: |
           tools/skyward-pack recovery --custom-base --stock stock/recovery.img --binary tools/skyward \
