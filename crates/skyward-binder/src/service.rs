@@ -39,10 +39,56 @@ fn methods_of(sdk: u32) -> Methods {
     }
 }
 
+impl Methods {
+    /// The numbering the other build of the directory keeps: the one that
+    /// names `listServices` where this one names something else.
+    fn other(self) -> Self {
+        match self.list_services {
+            4 => Methods { check_service: 3, list_services: 6, is_declared: 9 },
+            _ => Methods { check_service: 2, list_services: 4, is_declared: 7 },
+        }
+    }
+}
+
+/// The numbering the directory answered with, once it has.
+static KEPT: std::sync::OnceLock<Methods> = std::sync::OnceLock::new();
+
+/// The status libbinder answers a call with whose parcel was not opened the
+/// way it opens its own: `BAD_TYPE`. The recovery's own copies of libbinder
+/// and those built with the rest of Android write a different mark into the
+/// header, and each reads only its own.
+const BAD_TYPE: i32 = i32::MIN + 1;
+
+/// Whether the far side turned the call away as a parcel of the wrong kind.
+#[cfg(target_os = "android")]
+fn wrong_kind(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<crate::driver::Refused>().is_some_and(|r| r.0 == BAD_TYPE)
+}
+
+/// Run a call with the mark in use. A far side built with the other kind of
+/// libbinder reads only its own mark, so a parcel it turns away is sent
+/// again with the other, which is then kept for every call after it.
+#[cfg(target_os = "android")]
+fn with_mark<T>(call: impl Fn(i32) -> Result<T>) -> Result<T> {
+    match call(crate::parcel::header()) {
+        Err(e) if wrong_kind(&e) => {
+            let other = crate::parcel::other_header();
+            let out = call(other)?;
+            crate::parcel::keep_header(other);
+            let _ = skyward_sys::kmsg("the far side reads a parcel opened the other way; calls are opened that way from now on");
+            Ok(out)
+        }
+        other => other,
+    }
+}
+
 /// The recovery's own version, which its property files give.
 const SDK: &str = "ro.build.version.sdk";
 
 fn methods() -> Result<Methods> {
+    if let Some(kept) = KEPT.get() {
+        return Ok(*kept);
+    }
     let sdk = skyward_sys::prop(SDK).with_context(|| format!("the recovery says no {SDK}"))?;
     Ok(methods_of(sdk.parse().with_context(|| format!("{SDK} is {sdk:?}"))?))
 }
@@ -70,36 +116,61 @@ const INTERFACE_VERSION: u32 = 0x00ff_ffff;
 #[cfg(target_os = "android")]
 pub fn version(service: &crate::driver::Handle, interface: &str) -> Result<i32> {
     let what = format!("ask which version of {interface} is served");
-    let reply = service.transact(INTERFACE_VERSION, &Parcel::call(interface)).with_context(|| what.clone())?;
-    let mut read = reply.read();
-    status::ok(&mut read).with_context(|| what.clone())?;
-    read.i32().with_context(|| what)
+    with_mark(|mark| {
+        let reply = service
+            .transact(INTERFACE_VERSION, &Parcel::call_marked(interface, mark))
+            .with_context(|| what.clone())?;
+        let mut read = reply.read();
+        status::ok(&mut read).with_context(|| what.clone())?;
+        read.i32().with_context(|| what.clone())
+    })
 }
 
 /// The service registered under `name`, or `None` while nothing has
 /// registered it.
 #[cfg(target_os = "android")]
 pub fn find<'a>(binder: &'a crate::driver::Binder, name: &str) -> Result<Option<crate::driver::Handle<'a>>> {
-    let directory = binder.directory()?;
-    let mut call = Parcel::call(DIRECTORY);
-    call.string(name);
-    let reply = directory.transact(methods()?.check_service, &call).with_context(|| format!("look up {name}"))?;
-    let mut read = reply.read();
-    status::ok(&mut read).with_context(|| format!("look up {name}"))?;
-    match read.object().with_context(|| format!("read what the directory answered for {name}"))? {
-        Some(handle) => Ok(Some(crate::driver::Handle::hold(binder, handle)?)),
-        None => Ok(None),
-    }
+    with_mark(|mark| {
+        let directory = binder.directory()?;
+        let mut call = Parcel::call_marked(DIRECTORY, mark);
+        call.string(name);
+        let reply = directory.transact(methods()?.check_service, &call).with_context(|| format!("look up {name}"))?;
+        let mut read = reply.read();
+        status::ok(&mut read).with_context(|| format!("look up {name}"))?;
+        match read.object().with_context(|| format!("read what the directory answered for {name}"))? {
+            Some(handle) => Ok(Some(crate::driver::Handle::hold(binder, handle)?)),
+            None => Ok(None),
+        }
+    })
 }
 
 /// Every name registered with the directory, the directory's own among
-/// them.
+/// them. Which numbering and which mark of the header the directory keeps
+/// is not known before it answers, so the answer that comes back is what
+/// decides both, for this and every call after it.
 #[cfg(target_os = "android")]
 pub fn names(binder: &crate::driver::Binder) -> Result<Vec<String>> {
+    let declared = methods()?;
+    let mut last = None;
+    for m in [declared, declared.other()] {
+        match with_mark(|mark| list(binder, m, mark)) {
+            Ok(names) => {
+                KEPT.set(m).ok();
+                let _ = skyward_sys::kmsg(&format!("the service directory answers by method {} of its own", m.list_services));
+                return Ok(names);
+            }
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.expect("a numbering was tried"))
+}
+
+#[cfg(target_os = "android")]
+fn list(binder: &crate::driver::Binder, m: Methods, mark: i32) -> Result<Vec<String>> {
     let directory = binder.directory()?;
-    let mut call = Parcel::call(DIRECTORY);
+    let mut call = Parcel::call_marked(DIRECTORY, mark);
     call.i32(DUMP_PRIORITY_ALL);
-    let reply = directory.transact(methods()?.list_services, &call).context("list what has registered")?;
+    let reply = directory.transact(m.list_services, &call).context("list what has registered")?;
     let mut read = reply.read();
     status::ok(&mut read).context("list what has registered")?;
     let count = read.i32().context("read how many have registered")?;
@@ -128,13 +199,15 @@ pub fn interface(service: &crate::driver::Handle) -> Result<String> {
 /// see described.
 #[cfg(target_os = "android")]
 pub fn declared(binder: &crate::driver::Binder, name: &str) -> Result<bool> {
-    let directory = binder.directory()?;
-    let mut call = Parcel::call(DIRECTORY);
-    call.string(name);
-    let reply = directory.transact(methods()?.is_declared, &call).with_context(|| format!("ask whether {name} is described"))?;
-    let mut read = reply.read();
-    status::ok(&mut read).with_context(|| format!("ask whether {name} is described"))?;
-    read.bool().with_context(|| format!("read whether {name} is described"))
+    with_mark(|mark| {
+        let directory = binder.directory()?;
+        let mut call = Parcel::call_marked(DIRECTORY, mark);
+        call.string(name);
+        let reply = directory.transact(methods()?.is_declared, &call).with_context(|| format!("ask whether {name} is described"))?;
+        let mut read = reply.read();
+        status::ok(&mut read).with_context(|| format!("ask whether {name} is described"))?;
+        read.bool().with_context(|| format!("read whether {name} is described"))
+    })
 }
 
 #[cfg(test)]
@@ -151,5 +224,15 @@ mod tests {
         assert_eq!(methods_of(35), methods_of(33));
         assert_eq!(methods_of(36), Methods { check_service: 3, list_services: 6, is_declared: 9 }, "the 17 Ultra's recovery");
         assert_eq!(methods_of(37), methods_of(36));
+    }
+
+    /// The two numberings a phone's directory may keep, neither of which the
+    /// version a base reports need name: an update package's own userspace
+    /// says one version and carries the directory of another.
+    #[test]
+    fn either_numbering_leads_to_the_other() {
+        assert_eq!(methods_of(33).other(), methods_of(36));
+        assert_eq!(methods_of(36).other(), methods_of(33));
+        assert_ne!(methods_of(33).list_services, methods_of(33).other().list_services);
     }
 }

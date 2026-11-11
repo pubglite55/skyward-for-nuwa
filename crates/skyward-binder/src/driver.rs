@@ -87,6 +87,21 @@ fn bytes_of<T>(v: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts((v as *const T).cast::<u8>(), size_of::<T>()) }
 }
 
+/// A call the far side turned away with a status of its own. The numbers
+/// are libbinder's, and they say what the far side found: a parcel it was
+/// not built to read, an argument it would not take, a service it does not
+/// have. What the number means is read from it where the call is made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Refused(pub i32);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the call failed in the driver with error {}", self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
 /// This program's end of the driver.
 pub struct Binder {
     file: File,
@@ -204,7 +219,7 @@ impl Binder {
                     if td.flags & TF_STATUS_CODE != 0 {
                         let code = unsafe { std::ptr::read_unaligned(td.buffer as *const i32) };
                         self.free(td.buffer)?;
-                        bail!("the call failed in the driver with error {code}");
+                        return Err(Refused(code).into());
                     }
                     let data = unsafe { std::slice::from_raw_parts(td.buffer as *const u8, td.data_size as usize) };
                     return Ok(Some(Reply { binder: self, buffer: td.buffer, data }));
