@@ -673,7 +673,31 @@ fn adopt_installed_version(props: &std::collections::HashMap<String, String>) ->
         }
         skyward_sys::kmsg(&format!("{name} is the installed system's {value}"))?;
     }
+    // A key the secure world will not use as it is gets renewed for the
+    // build running now, and the renewal names that build the way the
+    // phone's own key broker does.
+    if let (Some(version), Some(patch)) = (
+        props.get("ro.build.version.release").and_then(|release| build_version(release)),
+        props.get("ro.build.version.security_patch").and_then(|patch| patch_level(patch)),
+    ) {
+        skyward_crypto::keymint::set_renewal_versions(version, patch);
+    }
     Ok(())
+}
+
+/// The build version as Android numbers builds: 16 is 160000.
+#[cfg(target_os = "android")]
+fn build_version(release: &str) -> Option<u32> {
+    Some(release.split('.').next()?.parse::<u32>().ok()? * 10_000)
+}
+
+/// The patch level as year and month: 2026-08-01 is 202608.
+#[cfg(target_os = "android")]
+fn patch_level(patch: &str) -> Option<u32> {
+    let mut parts = patch.split('-');
+    let year: u32 = parts.next()?.parse().ok()?;
+    let month: u32 = parts.next()?.parse().ok()?;
+    Some(year * 100 + month)
 }
 
 /// The recovery service. Its own folder is made and its log kept there from

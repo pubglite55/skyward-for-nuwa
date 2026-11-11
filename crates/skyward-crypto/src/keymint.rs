@@ -35,10 +35,6 @@ const NONCE_BYTES: usize = 12;
 /// the phone's own firmware and has to be renewed before it will be used.
 const KEY_REQUIRES_UPGRADE: i32 = -62;
 
-/// The key service's way of saying it does not do what was asked of it --
-/// here, that it cannot renew a key made by a newer secure world.
-const UNIMPLEMENTED: i32 = -38;
-
 /// What generation of the key format a blob came in: the AIDL envelope
 /// starts with the marker KMKD and the version right behind it, and a
 /// secure world older than that version cannot renew the key.
@@ -48,6 +44,17 @@ fn key_generation(blob: &[u8]) -> Option<u32> {
     }
     let b = blob.get(7..11)?;
     Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+/// The build the installed system is, as Android numbers builds, and its
+/// patch level: what a renewal hands the secure world with the key, the
+/// way the phone's own key broker does.
+static RENEWAL_VERSIONS: std::sync::OnceLock<(u32, u32)> = std::sync::OnceLock::new();
+
+/// Tell the renewals which build the installed system is: a key made
+/// under an older build is renewed for the build running now.
+pub fn set_renewal_versions(version: u32, patch: u32) {
+    let _ = RENEWAL_VERSIONS.set((version, patch));
 }
 
 const PURPOSE_DECRYPT: i32 = 1;
@@ -62,6 +69,10 @@ const TAG_PADDING: i32 = 536_870_918;
 const TAG_MAC_LENGTH: i32 = 805_307_371;
 const TAG_APPLICATION_ID: i32 = -1_879_047_591;
 const TAG_NONCE: i32 = -1_879_047_191;
+/// The build the key belongs to and its patch level, as the phone's own
+/// key broker hands them over with a renewal.
+const TAG_OS_VERSION: i32 = 805_307_073;
+const TAG_OS_PATCHLEVEL: i32 = 805_307_074;
 
 /// Which arm of a parameter's value is used.
 const VALUE_PADDING_MODE: i32 = 3;
@@ -324,14 +335,33 @@ impl<'a> KeyMint<'a> {
         read.blob().context("read the renewed key")
     }
 
-    /// The renewal, tried again without the parameters when the service
-    /// would not take them: some secure worlds refuse the parameters
-    /// rather than the renewal, and what the blob itself binds still
-    /// holds. A key made by a newer secure world is refused either way.
+    /// The renewal, tried the ways the phone's own key broker and this
+    /// recovery have each seen secure worlds take: first with the build
+    /// the installed system is and its patch level, as the broker sends
+    /// them; then with the operation's own parameters; and last with
+    /// nothing at all. A key made by a newer secure world is refused every
+    /// way.
     fn upgrade_retrying(&self, key_blob: &[u8], params: impl Fn(&mut Parcel)) -> Result<Vec<u8>> {
+        let mut refusals = Vec::new();
+        if let Some((version, patch)) = RENEWAL_VERSIONS.get() {
+            match self.upgrade(key_blob, |call| {
+                parameter(call, TAG_OS_VERSION, Value::Integer(*version as i32));
+                parameter(call, TAG_OS_PATCHLEVEL, Value::Integer(*patch as i32));
+            }) {
+                Ok(key) => return Ok(key),
+                Err(e) => refusals.push(e),
+            }
+        }
         match self.upgrade(key_blob, &params) {
-            Err(e) if status::refused_with(&e) == Some(UNIMPLEMENTED) => self.upgrade(key_blob, |_| {}),
-            other => other,
+            Ok(key) => return Ok(key),
+            Err(e) => refusals.push(e),
+        }
+        match self.upgrade(key_blob, |_| {}) {
+            Ok(key) => Ok(key),
+            Err(e) => {
+                refusals.push(e);
+                Err(refusals.pop().expect("a refusal was just put by"))
+            }
         }
     }
 
