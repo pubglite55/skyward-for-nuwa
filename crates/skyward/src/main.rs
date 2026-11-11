@@ -490,7 +490,7 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     let nodes = skyward_sys::ueventd::apply()?;
     skyward_sys::kmsg(&format!("{nodes} device nodes given the owner their phone describes"))?;
     let props = skyward_info::installed_props(slot)?;
-    adopt_installed_version(&props, &cfg)?;
+    adopt_installed_version(&props, cfg)?;
     // Without logd the phone's own programs still run, and only what they
     // log is lost, so why it did not start goes to the kernel log.
     if let Some(logd) = &cfg.logd {
