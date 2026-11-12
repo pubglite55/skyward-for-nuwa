@@ -34,15 +34,15 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。这个分支只
 | --- | --- | --- |
 | 小米 13 Pro | `nuwa` | OS4.0.24.0.XEOCNXM（Android 17） |
 
-镜像基于原厂 OS3.0.311.0.WMBCNXM 的 recovery 构建，即 `devices/nuwa.toml` 中指定的版本。
+镜像基于原厂 OS3.0.312.0.WMBCNXM 的 recovery 构建，即 `devices/nuwa.toml` 中指定的版本。
 
 ## 安装
 
 Skyward 需要已解锁的 bootloader。从本仓库的 [Releases](https://github.com/pubglite55/skyward-for-nuwa/releases) 下载 zip（由 `nuwa-v*` 标签发布），文件名形如 `skyward-nuwa-<版本>-<原厂版本>`。使用 `SHA256SUMS.txt` 核对并解压之后，在手机处于 fastboot 模式的时候，把其中的镜像刷入当前运行槽位的 recovery 分区：
 
 ```sh
-unzip skyward-nuwa-v1.3-OS3.0.311.0.WMBCNXM.zip
-fastboot flash recovery skyward-nuwa-v1.3-OS3.0.311.0.WMBCNXM.img
+unzip skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip
+fastboot flash recovery skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
 fastboot reboot recovery
 ```
 
@@ -51,6 +51,25 @@ fastboot reboot recovery
 super 中没有系统的时候，Skyward 仍然可以启动：屏幕和按键、adb、`adb sideload` 和 fastbootd 都能使用，足够装回一个系统。触摸、WLAN 和解密依赖已安装系统中的程序，系统装回之后随之恢复。
 
 Skyward 中的 adb 是 root shell，手机上无需授权：手机处于 recovery 的时候，任何人拿到手机和数据线都能访问其中的存储。
+
+## 解密
+
+数据分区是**按需打开**的：进入文件管理时打开，需要读写 `/data` 的更新安装也会先打开它。没有设置锁屏时自动打开，设置了锁屏时会询问。metadata 的密钥由手机硬件包裹，不需要输入任何东西。
+
+密钥按照**它被造出来时的构建**来度量，比当前系统更新的密钥会被拒绝使用，直到续期 —— 而更新构建的密钥永远得不到续期。这台手机的数据由 HyperOS 4（Android 17，补丁级 2099-12-31）写出，所以 `devices/nuwa.toml` 声明了那个构建：
+
+```toml
+build_release = "17"
+build_patch = "2099-12-31"
+```
+
+补丁级同时报给系统属性和 **vendor** 属性，因为密钥是对着 vendor 构建度量的。如果手机以后被更新的系统重置过，这两行就要改成那个系统的构建。日志里会写明密钥的代际，以及分区是否打开：
+
+```
+skyward: ro.vendor.build.security_patch speaks for the configuration's 2099-12-31, not the installed system's 2025-08-01
+skyward: the data partition is open: f2fs at /data
+skyward: the data partition stays closed: ... it was made by key format generation 4 ...
+```
 
 ## 构建
 

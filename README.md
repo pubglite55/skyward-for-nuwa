@@ -36,7 +36,7 @@ upstream project supports, see [kirklin/skyward](https://github.com/kirklin/skyw
 | --- | --- | --- |
 | Xiaomi 13 Pro | `nuwa` | OS4.0.24.0.XEOCNXM (Android 17) |
 
-The recovery image is built on the stock recovery of OS3.0.311.0.WMBCNXM, the
+The recovery image is built on the stock recovery of OS3.0.312.0.WMBCNXM, the
 build `devices/nuwa.toml` names.
 
 ## Installing
@@ -49,8 +49,8 @@ unzip it, and flash the image inside to the recovery partition of the slot the
 phone runs from, with the phone in fastboot mode:
 
 ```sh
-unzip skyward-nuwa-v1.3-OS3.0.311.0.WMBCNXM.zip
-fastboot flash recovery skyward-nuwa-v1.3-OS3.0.311.0.WMBCNXM.img
+unzip skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip
+fastboot flash recovery skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
 fastboot reboot recovery
 ```
 
@@ -64,6 +64,35 @@ from the installed system and come back with it.
 
 adb in Skyward is a root shell that needs no authorization on the phone: anyone
 with the phone and a cable can reach its storage while it is in recovery.
+
+## Decryption
+
+The data partition opens on demand: the file manager opens it when it is
+entered, and an update that needs `/data` opens it before reading it. Where no
+screen lock is set it opens by itself; where one is, the page asks for it. The
+metadata key is wrapped by the phone's hardware and needs nothing typed.
+
+A key is measured against the build it was made under, and a key made by a
+newer build than the one installed is refused until it is renewed — a renewal
+that a key of a newer build never gets. This phone's data was made by HyperOS 4
+(Android 17, patch level 2099-12-31), so `devices/nuwa.toml` names that build:
+
+```toml
+build_release = "17"
+build_patch = "2099-12-31"
+```
+
+The patch level is reported for the system's properties and the vendor's alike,
+because the vendor build is the one a key is measured against. Should the phone
+ever be reset from a newer system, those two lines have to name that system's
+build. The log then says which generation the key was made in, and whether the
+partition opened:
+
+```
+skyward: ro.vendor.build.security_patch speaks for the configuration's 2099-12-31, not the installed system's 2025-08-01
+skyward: the data partition is open: f2fs at /data
+skyward: the data partition stays closed: ... it was made by key format generation 4 ...
+```
 
 ## Building
 
