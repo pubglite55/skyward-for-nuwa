@@ -220,16 +220,16 @@ fn device_of<'a>(binder: &'a Binder, compat: Handle<'_>) -> Result<Handle<'a>> {
 impl<'a> KeyMint<'a> {
     /// Reach the running key service, or say that none is.
     pub fn open(binder: &'a Binder) -> Result<KeyMint<'a>> {
-        // The key store's own compatibility service is preferred where it is
-        // running: it hands out a key service of the newer kind whichever
-        // the phone keeps, and a key made by a build other than the one
-        // running is one only it knows how to renew.
-        if let Some(compat) = service::find(binder, COMPAT)? {
-            return Ok(KeyMint { device: device_of(binder, compat)? });
+        if let Some(device) = service::find(binder, SERVICE)? {
+            return Ok(KeyMint { device });
         }
-        let device = service::find(binder, SERVICE)?
-            .with_context(|| format!("{SERVICE} is not running; the phone's key service has to be started first"))?;
-        Ok(KeyMint { device })
+        // A phone whose own system has only a key service of an older kind
+        // has no service under that name: its key store offers one of the
+        // newer kind instead, built on the older one, and hands it out to
+        // whoever asks.
+        let compat = service::find(binder, COMPAT)?
+            .with_context(|| format!("{SERVICE} is not running and {COMPAT} does not offer one either; the phone's key service has to be started first"))?;
+        Ok(KeyMint { device: device_of(binder, compat)? })
     }
 
     pub fn hardware(&self) -> Result<Hardware> {
