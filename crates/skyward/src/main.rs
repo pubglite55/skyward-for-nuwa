@@ -670,32 +670,21 @@ fn adopt_installed_version(props: &std::collections::HashMap<String, String>, cf
     // speaks for that build: a key is never upgraded backwards, and the
     // secure world judges a key by the build it is asked to renew it for.
     // A property is set once and only once, so it is what is named here,
-    // not the installed system's, that goes in.
+    // not the installed system's, that goes in — the vendor build's patch
+    // level included, which is the level a key is measured against.
     for name in BUILD_VERSION {
         let installed = props.get(name).with_context(|| format!("the installed system says no {name}"))?;
-        let named = match name {
-            "ro.build.version.release" => cfg.device.build_release.as_ref(),
-            // The vendor build is the one the key service measures a key's
-            // own build against: a key made by a newer vendor build than the
-            // one the recovery reports is one the service will not use until
-            // it is renewed, and a renewal of it is refused. Where the
-            // configuration names a build, the vendor's patch level is that
-            // build's, not the installed vendor partition's — which on a
-            // phone whose data was made by a newer system is older than the
-            // key itself.
-            "ro.build.version.security_patch" | "ro.vendor.build.security_patch" => cfg.device.build_patch.as_ref(),
-            _ => None,
-        };
-        let value = named.unwrap_or(installed);
-        if skyward_sys::prop(name).as_ref() != Some(value) {
+        let (value, named) = cfg.spoken_for(name, installed);
+        if skyward_sys::prop(name).as_deref() != Some(value) {
             skyward_sys::set_prop(name, value)?;
         }
-        match named {
-            Some(named) => skyward_sys::kmsg(&format!(
-                "{name} speaks for the configuration's {named}, not the installed system's {installed}"
-            ))?,
-            None => skyward_sys::kmsg(&format!("{name} is the installed system's {value}"))?,
-        };
+        if named {
+            skyward_sys::kmsg(&format!(
+                "{name} speaks for the configuration's {value}, not the installed system's {installed}"
+            ))?;
+        } else {
+            skyward_sys::kmsg(&format!("{name} is the installed system's {value}"))?;
+        }
     }
     // A key the secure world will not use as it is gets renewed for the
     // build running now, and the renewal names that build the way the

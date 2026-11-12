@@ -2030,6 +2030,14 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
             decryptor = None;
             match ended {
                 decrypt::Ended::Opened(Ok(opening)) => {
+                    // One line saying the partition is open, so that a log
+                    // reads on its own: what follows says how it was mounted
+                    // and whose own files are still closed.
+                    let how = match &opening.mounted {
+                        Some(mounted) => format!("{} at {}", mounted.filesystem, skyward_crypto::data::MOUNT),
+                        None => "mounted by an earlier run of the recovery".to_string(),
+                    };
+                    skyward_sys::kmsg(&format!("the data partition is open: {how}"))?;
                     if let Some(mounted) = &opening.mounted {
                         log_mounted(mounted)?;
                     }

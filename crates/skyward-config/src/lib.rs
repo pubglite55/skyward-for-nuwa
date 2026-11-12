@@ -504,6 +504,28 @@ pub fn codename(text: &str) -> Result<String> {
 }
 
 impl DeviceConfig {
+    /// What a build property must say: the build the configuration names
+    /// where it names one, and the installed system's own otherwise. The
+    /// second half says which of the two it is, so that a property that
+    /// speaks for another build can be told apart in the log from one that
+    /// merely repeats the installed system.
+    ///
+    /// The vendor build's patch level is named by the same setting as the
+    /// system's: it is the vendor build the key service measures a key
+    /// against, and a phone whose data was made by a newer system than the
+    /// vendor partition it now boots keeps an older level there.
+    pub fn spoken_for<'a>(&'a self, name: &str, installed: &'a str) -> (&'a str, bool) {
+        let named = match name {
+            "ro.build.version.release" => self.device.build_release.as_deref(),
+            "ro.build.version.security_patch" | "ro.vendor.build.security_patch" => self.device.build_patch.as_deref(),
+            _ => None,
+        };
+        match named {
+            Some(named) => (named, true),
+            None => (installed, false),
+        }
+    }
+
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let p = path.as_ref();
         let text = std::fs::read_to_string(p)
@@ -629,6 +651,28 @@ mod tests {
         for command in ramdisk::COMMANDS {
             assert_eq!(folder(command), folder(ramdisk::RECOVERY), "{command}");
         }
+    }
+
+    /// The build a property speaks for: the one the configuration names, with
+    /// the vendor build's patch level named by the same setting. That is the
+    /// build the key service measures a key against, and on a phone whose data
+    /// was made by a newer system than the vendor partition it now boots, the
+    /// vendor partition's own level is older than the key itself.
+    #[test]
+    fn the_vendor_patch_level_speaks_for_the_named_build() {
+        let cfg = DeviceConfig::parse(include_str!("../../../devices/nuwa.toml")).unwrap();
+        assert_eq!(cfg.spoken_for("ro.build.version.release", "16"), ("17", true));
+        assert_eq!(cfg.spoken_for("ro.build.version.security_patch", "2026-08-01"), ("2099-12-31", true));
+        assert_eq!(
+            cfg.spoken_for("ro.vendor.build.security_patch", "2025-08-01"),
+            ("2099-12-31", true),
+            "the vendor patch level is the named build's, not the installed vendor partition's"
+        );
+        assert_eq!(
+            cfg.spoken_for("ro.product.device", "nuwa"),
+            ("nuwa", false),
+            "a property the configuration says nothing of is the installed system's"
+        );
     }
 
     /// The 13 Pro's own configuration: the build its keys were made by is
