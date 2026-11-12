@@ -261,7 +261,7 @@ impl<'a> KeyMint<'a> {
                 let renewed =
                     self.upgrade_retrying(key, |call| call.i32(0)).with_context(|| match key_generation(key) {
                         Some(gen) => format!(
-                            "renew the storage key for the firmware running now: it was made by key format generation {gen}, and this secure world cannot renew it"
+                            "renew the storage key for the firmware running now: it was made by key format generation {gen}, and this secure world cannot renew it -- name the build that made it in the configuration's build_release and build_patch"
                         ),
                         None => "renew the storage key for the firmware running now".to_string(),
                     })?;
@@ -344,7 +344,7 @@ impl<'a> KeyMint<'a> {
         }
         Err(anyhow::anyhow!("{}", said.join("; then "))).with_context(|| match key_generation(key_blob) {
             Some(gen) => format!(
-                "renew the key for the firmware running now: it was made by key format generation {gen}, and this secure world cannot renew it -- a system whose secure world is at least that new opens it"
+                "renew the key for the firmware running now: it was made by key format generation {gen}, and this secure world cannot renew it -- name the build that made it in the configuration's build_release and build_patch, and the recovery speaks for that build"
             ),
             None => "renew the key for the firmware running now".to_string(),
         })
