@@ -71,6 +71,17 @@ struct Message {
     message: String,
 }
 
+/// A version as a release names it: `1.5` is 1.5.0, because the semver crate
+/// wants all three parts and this fork's tags carry two.
+fn version_of(text: &str) -> Result<semver::Version> {
+    let padded = match text.matches('.').count() {
+        0 => format!("{text}.0.0"),
+        1 => format!("{text}.0"),
+        _ => text.to_string(),
+    };
+    semver::Version::parse(&padded).with_context(|| format!("{text} is not a version"))
+}
+
 /// The newest release that `answer`, GitHub's answer at [`LATEST`], tells
 /// of, and its zip for the phone `codename` names, as the build of version
 /// `running` sees it.
@@ -81,8 +92,8 @@ pub fn newest(answer: &str, codename: &str, running: &str) -> Result<Newest> {
     // upstream tags `v0.1.4`. The version is what follows the v either way.
     let named = tag.strip_prefix("nuwa-").unwrap_or(&tag);
     let version = named.strip_prefix('v').with_context(|| format!("the newest release is tagged {tag}, which is not v and a version"))?;
-    let newest = semver::Version::parse(version).with_context(|| format!("the newest release is tagged {tag}"))?;
-    let this = semver::Version::parse(running).with_context(|| format!("this build's version is {running}"))?;
+    let newest = version_of(version).with_context(|| format!("the newest release is tagged {tag}"))?;
+    let this = version_of(running).with_context(|| format!("this build's version is {running}"))?;
     // Upstream names each zip skyward-, the tag, the phone's codename, and the
     // stock build; this fork names it skyward-, the tag — which carries the
     // codename already — and the stock build.
