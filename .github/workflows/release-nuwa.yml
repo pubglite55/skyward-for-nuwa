@@ -52,7 +52,7 @@ jobs:
             --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
             --mono-license resources/fonts/KirkMono-OFL.txt --out "out/$name.img"
           (cd out && zip -9 "$name.zip" "$name.img")
-          sha256sum "out/$name.zip" | sed 's|out/||' > SHA256SUMS.txt
+          sha256sum "out/$name.zip" | sed 's|out/||' > "out/SHA256SUMS.txt"
           echo "name=$name" >> "$GITHUB_ENV"
       - name: Publish the release
         env:
@@ -79,4 +79,4 @@ jobs:
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 \
             && gh release upload "$GITHUB_REF_NAME" --clobber --repo "$GITHUB_REPOSITORY" "out/$name.zip" "out/SHA256SUMS.txt" \
             || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Skyward for nuwa · Xiaomi 13 Pro" \
-              --notes-file notes.md "out/$name.zip#Xiaomi 13 Pro (nuwa)" SHA256SUMS.txt
+              --notes-file notes.md "out/$name.zip#Xiaomi 13 Pro (nuwa)" "out/SHA256SUMS.txt"
