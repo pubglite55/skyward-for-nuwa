@@ -220,6 +220,15 @@ fn run(s: &Service, who: &Credentials) -> Result<String> {
 fn command(s: &Service, who: &Credentials) -> Command {
     let mut cmd = Command::new(&s.path);
     cmd.args(&s.args).current_dir("/").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // What the phone's own init gives every program it starts. The key store
+    // and the programs beside it look their folders up in these, and one
+    // that finds none of them stops on the spot.
+    cmd.env("ANDROID_ROOT", "/system");
+    cmd.env("ANDROID_DATA", "/data");
+    cmd.env("ANDROID_STORAGE", "/storage");
+    cmd.env("ANDROID_ART_ROOT", "/apex/com.android.art");
+    cmd.env("EXTERNAL_STORAGE", "/sdcard");
+    cmd.env("TMPDIR", "/tmp");
     if !s.libraries.is_empty() {
         cmd.env("LD_LIBRARY_PATH", s.libraries.join(":"));
     }
