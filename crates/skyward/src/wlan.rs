@@ -671,7 +671,13 @@ fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
     let net = Path::new("/sys/class/net").join(&cfg.interface);
     if !net.exists() {
         for file in &cfg.firmware {
-            place(file)?;
+            if let Err(e) = place(file) {
+                // A file the phone works without is there to be used when it
+                // is there: a wiped persist holds no MAC address, and the
+                // driver comes up with its own rather than not at all.
+                ensure!(file.optional, "{e:#}");
+                skyward_sys::kmsg(&format!("{} is not there, and {} comes up without it: {e:#}", file.name, cfg.interface))?;
+            }
         }
         for path in skyward_modules::load(modules, &cfg.modules)? {
             skyward_sys::kmsg(&format!("loaded {}", path.display()))?;

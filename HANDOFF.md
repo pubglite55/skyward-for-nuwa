@@ -292,6 +292,7 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward/src/wipe.rs` | 恢复出厂改为按 `metadata_encryption` 取条目判断 `rebuilt`（原来固定第一条，可能误判为不可重建而拒绝）；显式 reformat 时改用目标文件系统那条条目的参数去建文件系统 |
 | `crates/skyward-block/src/fsck.rs` | 挂载前的检查补上 ext4 的 `e2fsck -p`（原来只支持 f2fs，data 为 ext4 的系统会直接失败） |
 | `skyward-info` / `skyward-ui` / `skyward/src/ui.rs` | 开发构建（未设 `SKYWARD_VERSION`，版本显示 0.2.0）不再向 GitHub 查新版本，更新页写明「试验构建，不查找新版本」；此前会认为 `1.5` 比 `0.2.0` 新并可一键**降级**回 v1.5 |
+| `crates/skyward/src/wlan.rs`、`skyward-config`、`devices/nuwa.toml` | WLAN 固件里的校准文件（persist 的 `kiwi_v2/wlan_mac.bin`）标为「可选」：缺失时记内核日志并继续启动，不再整段中止。此前 persist 被清过的机器会一直报「无法开启 WLAN」 |
 
 新增单元测试 12 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 3、`wipe.rs` 1、`fsck.rs` 1）。**验证进度**：推分支 ✅ → `build.yml` lint + test 绿 ✅ → 合并 `fork/main` ✅ → 第二轮改动待 CI → 打包刷机（待做）→ 真机进文件页确认解密后自动重列（待做）。
 

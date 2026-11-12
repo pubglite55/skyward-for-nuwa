@@ -122,13 +122,15 @@ groups = ["system", "uhid", "input"]
 # taken to be. Its recovery covers the vendor partition's firmware folder
 # with the modem's, as the 13 Ultra's does, so the settings and the MAC
 # address are given to the loader again: the settings from the vendor
-# partition, the address from where the vendor's link points in persist.
+# partition, the address from where the vendor's link points in persist —
+# where a persist that was wiped no longer keeps it, and the driver comes up
+# with an address of its own rather than not at all.
 [wlan]
 modules = ["qca_cld3_kiwi_v2"]
 writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
 firmware = [
     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "kiwi_v2/wlan_mac.bin" },
+    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "kiwi_v2/wlan_mac.bin", optional = true },
 ]
 interface = "wlan0"
 supplicant = "/vendor/bin/hw/wpa_supplicant"

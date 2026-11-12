@@ -161,6 +161,12 @@ pub struct Firmware {
     /// read-only while the file is read.
     #[serde(default)]
     pub partition: Option<String>,
+    /// Whether the phone works without it. A calibration file the recovery
+    /// puts where the loader looks when it is there, and does without when
+    /// it is not: a persist partition that was wiped holds no MAC address,
+    /// and the driver comes up with its own.
+    #[serde(default)]
+    pub optional: bool,
 }
 
 /// The phone maker's update server, which the stock updater asks about the
@@ -849,5 +855,9 @@ mod tests {
         assert!(with("{ name = \"a.ini\", path = \"vendor/etc/a.ini\" }").is_err());
         assert!(with("{ name = \"mac.bin\", partition = \"persist\", path = \"/kiwi/mac.bin\" }").is_err());
         assert!(with("{ name = \"mac.bin\", partition = \"by-name/persist\", path = \"mac.bin\" }").is_err());
+        let optional = with("{ name = \"wlan/mac.bin\", partition = \"persist\", path = \"kiwi/mac.bin\", optional = true }").unwrap();
+        assert!(optional.wlan.unwrap().firmware[0].optional, "a file the phone works without says so");
+        let needed = with("{ name = \"wlan/a.ini\", path = \"/vendor/etc/a.ini\" }").unwrap();
+        assert!(!needed.wlan.unwrap().firmware[0].optional, "one that says nothing is needed");
     }
 }
