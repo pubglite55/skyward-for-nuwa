@@ -707,6 +707,15 @@ fn adopt_installed_version(props: &std::collections::HashMap<String, String>, cf
     if let (Some(version), Some(patch)) = (release, patch) {
         skyward_crypto::keymint::set_renewal_versions(version, patch);
     }
+    // What the installed system itself says it is, beside what the
+    // configuration speaks for: a phone keeps the build its keys were made
+    // under in its own property files, and an operation naming that build
+    // is the one the secure world leaves a key usable for.
+    let installed_release = props.get("ro.build.version.release").and_then(|release| build_version(release));
+    let installed_patch = props.get("ro.build.version.security_patch").and_then(|patch| patch_level(patch));
+    if let (Some(version), Some(patch)) = (installed_release, installed_patch) {
+        skyward_crypto::keymint::set_installed_versions(version, patch);
+    }
     Ok(())
 }
 
