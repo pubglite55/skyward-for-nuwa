@@ -10,7 +10,7 @@ use crate::keystore::{StoredKey, Unwrap};
 use crate::token::Token;
 use crate::user::Bound;
 use crate::weaver::Weaver;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use skyward_binder::driver::Binder;
 use skyward_block::dm::Target;
 use skyward_block::fsck::Checked;
@@ -59,21 +59,32 @@ impl Encryption {
             .iter()
             .find_map(|(theirs, kernels)| (*theirs == name).then_some(*kernels))
             .with_context(|| format!("no cipher here is the {name} the phone names"))?;
-        Ok(Encryption { cipher: cipher.to_string(), wrapped: rest == "wrappedkey_v0" })
+        // What follows the cipher says who holds the key: nothing, where the
+        // key is the one that was written down, and a form of the hardware's
+        // wrapping otherwise, the first version of it and the ones after.
+        let wrapped = match rest {
+            "" => false,
+            rest if rest.starts_with("wrappedkey_v") => true,
+            other => bail!("the phone names {other} after the cipher, which is no way of holding a key here"),
+        };
+        Ok(Encryption { cipher: cipher.to_string(), wrapped })
     }
 }
 
+/// Where a table that names no directory keeps the key: the one fs_mgr reads
+/// a table's silence as.
+const KEY_DIRECTORY: &str = "/metadata/vold/metadata_encryption";
+
 /// Where the phone keeps the key for the filesystem an entry describes.
-pub fn key_dir(entry: &Entry) -> Result<PathBuf> {
-    let dir = entry.extra("keydirectory").context("the phone says where the key for its data partition is not")?;
-    Ok(Path::new(dir).join(KEY_DIR))
+pub fn key_dir(entry: &Entry) -> PathBuf {
+    Path::new(entry.extra("keydirectory").unwrap_or(KEY_DIRECTORY)).join(KEY_DIR)
 }
 
 /// Unwrap the key the phone keeps for its data partition and give the
 /// storage hardware the form of it that lasts until the phone is started
 /// again.
 pub fn storage_key(service: &KeyMint, entry: &Entry, encryption: &Encryption) -> Result<Vec<u8>> {
-    hardware_key(service, &key_dir(entry)?, encryption.wrapped)
+    hardware_key(service, &key_dir(entry), encryption.wrapped)
 }
 
 /// The key a directory holds, in the form the storage hardware takes for
@@ -90,7 +101,9 @@ fn hardware_key(service: &KeyMint, dir: &Path, wrapped: bool) -> Result<Vec<u8>>
 
 /// The data partition as [`open`] leaves it.
 pub struct Opened {
-    /// The device the partition is read and written through, decrypted.
+    /// The device the partition is read and written through: the decrypted
+    /// one where the phone encrypts it whole, and the partition itself where
+    /// it does not.
     pub mapped: PathBuf,
     pub filesystem: String,
     /// How the check before mounting ended, where the phone's table asks
@@ -102,24 +115,14 @@ pub struct Opened {
 /// give that to the storage hardware, check the filesystem where the
 /// phone's table asks for it, and mount it writable, as the phone mounts
 /// it. The names and contents of each user's own files stay encrypted
-/// until that user's key is let in as well. A partition that does not
-/// mount leaves no device behind.
+/// until that user's key is let in as well. A partition the phone does not
+/// encrypt whole is mounted as it lies. A partition that does not mount
+/// leaves no device behind.
 fn open(service: &KeyMint) -> Result<Opened> {
-    let (entries, mapped) = map(service)?;
-    let mounted = (|| -> Result<(Option<Checked>, String)> {
-        // A phone that names the partition once per filesystem it might
-        // hold mounts it with the entry of the one it holds.
-        let holds = skyward_block::probe::filesystem(&mapped)?;
-        let entry = entries.iter().find(|e| holds.as_ref() == Some(&e.filesystem)).unwrap_or(&entries[0]);
-        let checked = match entry.extras.iter().any(|e| e == "check") {
-            true => Some(skyward_block::fsck::check(&mapped, &entry.filesystem)?),
-            false => None,
-        };
-        std::fs::create_dir_all(MOUNT).with_context(|| format!("make {MOUNT}"))?;
-        mount::mount(&mapped, Path::new(MOUNT), &entry.filesystem, &entry.options)?;
-        Ok((checked, entry.filesystem.clone()))
-    })();
-    match mounted {
+    let entries = skyward_block::fstab::read(MOUNT)?;
+    let Some(keyed) = encryption_entry(&entries)? else { return open_as_it_lies(&entries) };
+    let mapped = map(service, keyed)?;
+    match mount_data(&entries, keyed, &mapped) {
         Ok((checked, filesystem)) => Ok(Opened { mapped, filesystem, checked }),
         Err(e) => match dm::remove(MAPPED) {
             Ok(()) => Err(e),
@@ -128,43 +131,77 @@ fn open(service: &KeyMint) -> Result<Opened> {
     }
 }
 
+/// Mount the partition at /data as the entry of the filesystem it holds
+/// says, after the check that entry asks for, and give how the check ended
+/// and the filesystem. `keyed` is the entry the key was found by, which is
+/// what a probe that names no filesystem falls back to.
+fn mount_data(entries: &[Entry], keyed: &Entry, device: &Path) -> Result<(Option<Checked>, String)> {
+    // A phone that names the partition once per filesystem it might hold
+    // mounts it with the entry of the one it holds.
+    let holds = skyward_block::probe::filesystem(device)?;
+    let entry = entries.iter().find(|e| holds.as_ref() == Some(&e.filesystem)).unwrap_or(keyed);
+    let checked = match entry.extras.iter().any(|e| e == "check") {
+        true => Some(skyward_block::fsck::check(device, &entry.filesystem)?),
+        false => None,
+    };
+    std::fs::create_dir_all(MOUNT).with_context(|| format!("make {MOUNT}"))?;
+    mount::mount(device, Path::new(MOUNT), &entry.filesystem, &entry.options)?;
+    Ok((checked, entry.filesystem.clone()))
+}
+
+/// Mount a data partition the phone does not encrypt whole as it lies, the
+/// way its table mounts it, and give it as opened.
+fn open_as_it_lies(entries: &[Entry]) -> Result<Opened> {
+    let Some(first) = entries.first() else { bail!("the phone's own table says nothing about {MOUNT}") };
+    let mapped = PathBuf::from(skyward_block::fstab::device(first)?);
+    let (checked, filesystem) = mount_data(entries, first, &mapped)?;
+    Ok(Opened { mapped, filesystem, checked })
+}
+
 /// Map the data partition decrypted, under the key the phone keeps for it,
-/// and give its table's entries and the device the filesystem is read and
-/// written through.
-fn map(service: &KeyMint) -> Result<(Vec<Entry>, PathBuf)> {
-    let entries = skyward_block::fstab::read(MOUNT)?;
-    let entry = encryption_entry(&entries)?;
+/// and give the device the filesystem is read and written through.
+fn map(service: &KeyMint, entry: &Entry) -> Result<PathBuf> {
     let encryption = Encryption::of(entry)?;
     let device = skyward_block::fstab::device(entry)?;
     let key = storage_key(service, entry, &encryption)?;
     let sectors = skyward_block::size_bytes(&device)? / 512;
-    let mapped = dm::create(MAPPED, &[target(&device, sectors, &key, &encryption)], false)?;
-    Ok((entries, mapped))
+    dm::create(MAPPED, &[target(&device, sectors, &key, &encryption)], false)
 }
 
 /// The entry the key for the partition is found by: the one that says how
 /// the partition is encrypted whole. A phone may name the partition once per
 /// filesystem it might hold, and only the one it holds says so; the others
-/// are there for the filesystem that is not. Where no entry says it, the
-/// first is given, so that what the phone does say is what the error names.
-fn encryption_entry(entries: &[Entry]) -> Result<&Entry> {
-    match entries.iter().find(|e| e.extra("metadata_encryption").is_some()) {
-        Some(entry) => Ok(entry),
-        None => entries.first().with_context(|| format!("the phone's own table says nothing about {MOUNT}")),
+/// are there for the filesystem that is not. None where no entry says it:
+/// the phone encrypts no part of the partition whole.
+fn encryption_entry(entries: &[Entry]) -> Result<Option<&Entry>> {
+    if entries.is_empty() {
+        bail!("the phone's own table says nothing about {MOUNT}");
     }
+    Ok(skyward_block::fstab::encrypted(entries))
 }
 
 /// Map the data partition decrypted without mounting it, for its
 /// filesystem to be repaired, and give the device it is reached through;
-/// [`unmap`] takes it away again. The partition is to be closed.
+/// [`unmap`] takes it away again. The partition is to be closed. A
+/// partition the phone does not encrypt whole is given as it lies.
 pub fn map_unmounted(service: &KeyMint) -> Result<PathBuf> {
     anyhow::ensure!(dm::status(MAPPED)?.is_none(), "the data partition is open");
-    map(service).map(|(_, mapped)| mapped)
+    let entries = skyward_block::fstab::read(MOUNT)?;
+    match encryption_entry(&entries)? {
+        Some(entry) => map(service, entry),
+        None => match entries.first() {
+            Some(entry) => Ok(PathBuf::from(skyward_block::fstab::device(entry)?)),
+            None => bail!("the phone's own table says nothing about {MOUNT}"),
+        },
+    }
 }
 
-/// Take away the mapping [`map_unmounted`] made.
+/// Take away the mapping [`map_unmounted`] made, where it made one.
 pub fn unmap() -> Result<()> {
-    dm::remove(MAPPED)
+    if dm::status(MAPPED)?.is_some() {
+        dm::remove(MAPPED)?;
+    }
+    Ok(())
 }
 
 /// Show the owner's shared storage at /sdcard; shown already, it stays.
@@ -293,9 +330,15 @@ const FILE_MODE: &str = "/data/unencrypted/mode";
 const USER_KEYS: &str = "/data/misc/vold/user_keys";
 
 /// Let in the key for the files that belong to no one user. Until it is
-/// in, most of what the data partition holds reads as scrambled names.
-fn open_shared(service: &KeyMint) -> Result<[u8; crate::fscrypt::NAME_BYTES]> {
-    let mode = std::fs::read_to_string(FILE_MODE).with_context(|| format!("read {FILE_MODE}"))?;
+/// in, most of what the data partition holds reads as scrambled names. A
+/// phone that encrypts no files with a key of their own keeps none there,
+/// and there is nothing to let in.
+fn open_shared(service: &KeyMint) -> Result<()> {
+    let mode = match std::fs::read_to_string(FILE_MODE) {
+        Ok(mode) => mode,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("read {FILE_MODE}")),
+    };
     let wrapped = crate::fscrypt::hardware_wrapped(mode.trim());
     let raw = hardware_key(service, Path::new(SHARED_KEY), wrapped)?;
     let name = crate::fscrypt::add_key(Path::new(MOUNT), &raw, wrapped)?;
@@ -303,14 +346,19 @@ fn open_shared(service: &KeyMint) -> Result<[u8; crate::fscrypt::NAME_BYTES]> {
     if name != recorded {
         anyhow::bail!("the key in {SHARED_KEY} is not the one {SHARED_NAME} names");
     }
-    Ok(name)
+    Ok(())
 }
 
 /// Which users the phone keeps keys for, in order.
 fn users() -> Result<Vec<u32>> {
     let dir = Path::new(USER_KEYS).join("de");
     let mut users = Vec::new();
-    for entry in std::fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))? {
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(users),
+        Err(e) => return Err(e).with_context(|| format!("read {}", dir.display())),
+    };
+    for entry in entries {
         let path = entry.with_context(|| format!("read {}", dir.display()))?.path();
         let Some(user) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.parse::<u32>().ok()) else { continue };
         users.push(user);
@@ -322,7 +370,11 @@ fn users() -> Result<Vec<u32>> {
 /// Let in the keys for the files of each user that are readable before
 /// that user signs in, and give the users they belong to.
 fn open_users(service: &KeyMint) -> Result<Vec<u32>> {
-    let mode = std::fs::read_to_string(FILE_MODE).with_context(|| format!("read {FILE_MODE}"))?;
+    let mode = match std::fs::read_to_string(FILE_MODE) {
+        Ok(mode) => mode,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e).with_context(|| format!("read {FILE_MODE}")),
+    };
     let wrapped = crate::fscrypt::hardware_wrapped(mode.trim());
     let users = users()?;
     for user in &users {
@@ -614,13 +666,15 @@ mod tests {
     fn a_cipher_or_a_key_the_phone_does_not_name_is_an_error() {
         assert!(Encryption::of(&entry("quota")).is_err());
         assert!(Encryption::of(&entry("metadata_encryption=rot13")).is_err());
-        assert!(key_dir(&entry("quota")).is_err());
+        assert!(Encryption::of(&entry("metadata_encryption=aes-256-xts:keymaster_v9")).is_err(), "no key held that way");
     }
 
     #[test]
     fn the_key_is_in_a_directory_under_the_one_the_phone_names() {
         let e = entry("keydirectory=/metadata/vold/metadata_encryption");
-        assert_eq!(key_dir(&e).unwrap(), Path::new("/metadata/vold/metadata_encryption/key"));
+        assert_eq!(key_dir(&e), Path::new("/metadata/vold/metadata_encryption/key"));
+        let silent = entry("latemount,quota");
+        assert_eq!(key_dir(&silent), Path::new(KEY_DIRECTORY).join(KEY_DIR), "a table that names none says the default");
     }
 
     #[test]
@@ -629,17 +683,23 @@ mod tests {
         other.filesystem = "mifs".into();
         let encrypted = entry("latemount,metadata_encryption=adiantum,keydirectory=/metadata/vold/metadata_encryption");
         let both = [other, encrypted.clone()];
-        assert_eq!(encryption_entry(&both).unwrap(), &encrypted, "the one that says it, not the first");
-        let only = [entry("latemount,quota")];
-        assert_eq!(encryption_entry(&only).unwrap(), &only[0], "where none says it, the first");
+        assert_eq!(encryption_entry(&both).unwrap(), Some(&encrypted), "the one that says it, not the first");
         assert!(encryption_entry(&[]).is_err(), "a table with no entry for the partition at all");
     }
 
     #[test]
-    fn a_partition_whose_entries_say_nothing_of_encryption_is_refused_as_before() {
+    fn a_table_that_says_nothing_of_encryption_names_no_entry_to_find_a_key_by() {
         let none = [entry("latemount,quota")];
-        let error = Encryption::of(encryption_entry(&none).unwrap()).unwrap_err();
+        assert_eq!(encryption_entry(&none).unwrap(), None, "the partition is mounted as it lies");
+        let error = Encryption::of(&none[0]).unwrap_err();
         assert!(format!("{error:#}").contains("not encrypted whole"), "{error:#}");
+    }
+
+    #[test]
+    fn the_hardwares_wrapping_is_read_in_every_version_the_phone_names_it_in() {
+        for said in ["aes-256-xts:wrappedkey_v0", "aes-256-xts:wrappedkey_v1"] {
+            assert!(Encryption::of(&entry(&format!("metadata_encryption={said}"))).unwrap().wrapped, "{said}");
+        }
     }
 
     #[test]

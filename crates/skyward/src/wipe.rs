@@ -172,11 +172,19 @@ pub fn factory_reset(reformat: Option<String>) -> Result<Plan, Stop> {
         if let Some(hold) = update_hold()? {
             return Ok(Err(Refusal::Update(hold)));
         }
-        let data = first(DATA)?;
-        let rebuilt = data.extra("keydirectory").is_some() && data.extras.iter().any(|e| e == "formattable");
+        let entries = fstab::read(DATA)?;
+        let keyed = data_entry(&entries)?;
+        let rebuilt = keyed.extra("keydirectory").is_some() && keyed.extras.iter().any(|e| e == "formattable");
         if !rebuilt && reformat.is_none() {
             return Ok(Err(Refusal::NotRebuilt));
         }
+        // The table says of each filesystem it might hold what making it
+        // afresh takes, so where the system asks for one, the entry is that
+        // filesystem's.
+        let data = match &reformat {
+            Some(filesystem) => entries.into_iter().find(|e| e.filesystem == filesystem.as_str()).unwrap_or(keyed),
+            None => keyed,
+        };
         Ok(Ok(Plan { data, cache: cache()?, metadata: first(METADATA)?, reformat }))
     })();
     match plan {
@@ -501,6 +509,16 @@ pub fn cache() -> Result<Option<Entry>> {
 /// system tries first.
 fn first(mount_point: &str) -> Result<Entry> {
     fstab::read(mount_point)?.into_iter().next().with_context(|| format!("the phone's table has no {mount_point}"))
+}
+
+/// The entry of the data partition to work from: the one that says how it
+/// is encrypted whole, where the table names more than one filesystem it
+/// might hold, and the first where it names only one.
+fn data_entry(entries: &[Entry]) -> Result<Entry> {
+    match fstab::encrypted(entries) {
+        Some(entry) => Ok(entry.clone()),
+        None => entries.first().cloned().with_context(|| format!("the phone's table has no {DATA}")),
+    }
 }
 
 /// Make the partition an entry names afresh as `filesystem`, with nothing
@@ -839,6 +857,25 @@ pub fn said(stop: &Stop) -> String {
 mod tests {
     use super::*;
     use skyward_crypto::fscrypt::{self, NAME_BYTES};
+
+    fn an_entry(filesystem: &str, extras: &str) -> Entry {
+        Entry {
+            device: "/dev/block/bootdevice/by-name/userdata".into(),
+            mount_point: DATA.into(),
+            filesystem: filesystem.into(),
+            options: vec!["noatime".into()],
+            extras: extras.split(',').map(str::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn the_data_partition_erased_is_the_one_that_says_how_it_is_encrypted() {
+        let mifs = an_entry("mifs", "latemount,keydirectory=/metadata/vold/metadata_encryption");
+        let f2fs = an_entry("f2fs", "latemount,formattable,metadata_encryption=aes-256-xts:wrappedkey_v0");
+        assert_eq!(data_entry(&[mifs, f2fs.clone()]).unwrap(), f2fs, "the one that says it, not the first");
+        assert_eq!(data_entry(&[an_entry("f2fs", "latemount")]).unwrap().filesystem, "f2fs", "the first where one is named");
+        assert!(data_entry(&[]).is_err(), "a table with no /data at all");
+    }
 
     /// A folder for a test, in the temporary folder. On the phone that is
     /// the folder the users' shared storage is in, /data/media: on the data

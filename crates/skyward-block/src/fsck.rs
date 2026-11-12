@@ -35,6 +35,10 @@ const UNSHARE_EXT: [&str; 3] = ["-p", "-E", "unshare_blocks"];
 const CLEAN: i32 = 0;
 const FIXED: [i32; 2] = [1, 2];
 
+/// What checks ext4 before it is mounted: the preen check, which fixes what
+/// it can without asking, as fs_mgr runs it.
+const CHECK_EXT: [&str; 1] = ["-p"];
+
 /// How a check ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checked {
@@ -47,13 +51,13 @@ pub struct Checked {
 /// Check `device`, which holds `filesystem`, as the phone's fs_mgr does
 /// before it mounts one, and fix what the kernel marked as needing it.
 pub fn check(device: &Path, filesystem: &str) -> Result<Checked> {
-    match filesystem {
-        "f2fs" => {
-            let ran = tools::find(FSCK_F2FS)?.run(&arguments(&CHECK_F2FS, device)?)?;
-            Ok(Checked { status: ran.status, said: ran.said })
-        }
+    let (program, options): (&str, &[&str]) = match filesystem {
+        "f2fs" => (FSCK_F2FS, &CHECK_F2FS[..]),
+        "ext4" | "ext3" | "ext2" => (E2FSCK, &CHECK_EXT[..]),
         other => bail!("{} holds {other}, which the recovery does not check before writing to it", device.display()),
-    }
+    };
+    let ran = tools::find(program)?.run(&arguments(options, device)?)?;
+    Ok(Checked { status: ran.status, said: ran.said })
 }
 
 /// How a repair left the filesystem.
@@ -125,8 +129,14 @@ mod tests {
     }
 
     #[test]
+    fn ext4_is_checked_before_mounting_as_the_phone_checks_it() {
+        let args = arguments(&CHECK_EXT, Path::new("/dev/block/dm-8")).unwrap();
+        assert_eq!(args, ["-p", "/dev/block/dm-8"]);
+    }
+
+    #[test]
     fn a_filesystem_the_recovery_does_not_check_or_repair_is_refused() {
-        assert!(check(Path::new("/dev/x"), "ext4").is_err(), "only f2fs is checked before mounting");
+        assert!(check(Path::new("/dev/x"), "erofs").is_err(), "no checker for it is carried");
         assert!(repair(Path::new("/dev/x"), "erofs").is_err());
     }
 

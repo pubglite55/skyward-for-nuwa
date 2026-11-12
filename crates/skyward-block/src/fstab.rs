@@ -82,6 +82,13 @@ pub fn read(mount_point: &str) -> Result<Vec<Entry>> {
     Ok(table()?.into_iter().filter(|e| e.mount_point == mount_point).collect())
 }
 
+/// The entry that says how a partition is encrypted whole, where the table
+/// names more than one filesystem it might hold: only the one the phone
+/// holds says so, and the others are there for the filesystem that is not.
+pub fn encrypted(entries: &[Entry]) -> Option<&Entry> {
+    entries.iter().find(|e| e.extra("metadata_encryption").is_some())
+}
+
 /// What the phone's own table says about the partition `name`: the first
 /// entry naming it, by whichever path the table reaches it.
 pub fn partition(name: &str) -> Result<Option<Entry>> {
