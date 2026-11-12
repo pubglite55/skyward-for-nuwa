@@ -4,8 +4,10 @@
 use anyhow::{bail, ensure, Context, Result};
 use serde::Deserialize;
 
-/// Where GitHub answers which release of Skyward is the newest.
-pub const LATEST: &str = "https://api.github.com/repos/kirklin/skyward/releases/latest";
+/// Where GitHub answers which release of Skyward is the newest: this fork's
+/// own, so that a build of this fork updates to itself rather than to
+/// upstream's, which has no image for this phone.
+pub const LATEST: &str = "https://api.github.com/repos/pubglite55/skyward-for-nuwa/releases/latest";
 
 /// The version of GitHub's API the answer is read as.
 const API_VERSION: &str = "2022-11-28";
@@ -75,13 +77,23 @@ struct Message {
 pub fn newest(answer: &str, codename: &str, running: &str) -> Result<Newest> {
     let release: Release = serde_json::from_str(answer).context("read GitHub's answer")?;
     let tag = release.tag_name;
-    let version = tag.strip_prefix('v').with_context(|| format!("the newest release is tagged {tag}, which is not v and a version"))?;
+    // This fork tags its releases with the phone's name in front, `nuwa-v1.5`;
+    // upstream tags `v0.1.4`. The version is what follows the v either way.
+    let named = tag.strip_prefix("nuwa-").unwrap_or(&tag);
+    let version = named.strip_prefix('v').with_context(|| format!("the newest release is tagged {tag}, which is not v and a version"))?;
     let newest = semver::Version::parse(version).with_context(|| format!("the newest release is tagged {tag}"))?;
     let this = semver::Version::parse(running).with_context(|| format!("this build's version is {running}"))?;
-    // Each zip is named skyward-, the tag, the phone's codename, and the
-    // stock build the image is made on.
-    let start = format!("skyward-{tag}-{codename}-");
-    let build = match release.assets.into_iter().find(|a| a.name.starts_with(&start) && a.name.ends_with(".zip")) {
+    // Upstream names each zip skyward-, the tag, the phone's codename, and the
+    // stock build; this fork names it skyward-, the tag — which carries the
+    // codename already — and the stock build.
+    let prefixed = format!("skyward-{tag}-{codename}-");
+    let tagged = format!("skyward-{tag}-");
+    let named_in_tag = tag.split('-').any(|part| part == codename);
+    let found = release
+        .assets
+        .into_iter()
+        .find(|a| a.name.ends_with(".zip") && (a.name.starts_with(&prefixed) || (named_in_tag && a.name.starts_with(&tagged))));
+    let build = match found {
         None => None,
         Some(a) => {
             let sha256 = a.digest.as_deref().and_then(|d| d.strip_prefix("sha256:")).with_context(|| format!("GitHub gives no SHA-256 of {}", a.name))?;
@@ -167,6 +179,35 @@ mod tests {
             })
         );
         assert_eq!(newest(ANSWERED_013, "nezha", "0.1.2").unwrap().build.unwrap().size, 43145196);
+    }
+
+    /// What GitHub answers of this fork's newest release, the v1.5 that is
+    /// out now, with the parts that do not matter here left out.
+    const ANSWERED_NUWA_15: &str = r#"{"tag_name":"nuwa-v1.5","assets":[{"url":"https://api.github.com/repos/pubglite55/skyward-for-nuwa/releases/assets/1","name":"SHA256SUMS.txt","size":108,"digest":null,"browser_download_url":"https://github.com/pubglite55/skyward-for-nuwa/releases/download/nuwa-v1.5/SHA256SUMS.txt"},{"url":"https://api.github.com/repos/pubglite55/skyward-for-nuwa/releases/assets/2","name":"skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip","size":43348321,"digest":"sha256:85f67fb4a699492398e8fe69a76f0388de39338a44f8e6ed078bfef1f4d56b0f","browser_download_url":"https://github.com/pubglite55/skyward-for-nuwa/releases/download/nuwa-v1.5/skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip"}]}"#;
+
+    /// This fork's tags carry the phone's name in front, and its zips are
+    /// named with that tag rather than with the codename after it.
+    #[test]
+    fn this_forks_release_is_read_by_its_own_tag_and_name() {
+        let n = newest(ANSWERED_NUWA_15, "nuwa", "1.4").unwrap();
+        assert_eq!(n.version, "1.5", "the version is what follows nuwa-v");
+        assert!(n.newer);
+        let build = n.build.expect("the release holds this phone's zip");
+        assert_eq!(build.name, "skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip");
+        assert_eq!(build.sha256, "85f67fb4a699492398e8fe69a76f0388de39338a44f8e6ed078bfef1f4d56b0f");
+        assert_eq!(build.size, 43348321);
+    }
+
+    #[test]
+    fn a_build_of_the_newest_release_is_not_newer_than_itself() {
+        assert!(!newest(ANSWERED_NUWA_15, "nuwa", "1.5").unwrap().newer);
+        assert!(!newest(ANSWERED_NUWA_15, "nuwa", "1.10").unwrap().newer, "1.10 comes after 1.5");
+        assert!(newest(ANSWERED_NUWA_15, "nuwa", "1.4").unwrap().newer);
+    }
+
+    #[test]
+    fn another_phones_build_is_not_taken_from_this_forks_release() {
+        assert_eq!(newest(ANSWERED_NUWA_15, "ishtar", "1.0").unwrap().build, None);
     }
 
     #[test]
