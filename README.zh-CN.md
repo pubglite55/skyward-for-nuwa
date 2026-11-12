@@ -4,7 +4,9 @@
 
 [English](README.md) | 简体中文
 
-Skyward 是使用 Rust 编写的 recovery，从零开始编写。这个分支只服务一台手机：**小米 13 Pro**（代号 `nuwa`）。上游项目支持的其他机型见 [kirklin/skyward](https://github.com/kirklin/skyward)。
+Skyward 是用 Rust 从零编写的 Android recovery：没有 TWRP 的框架，不基于 AOSP recovery，也没有 Java。它像原厂 recovery 一样从 recovery 分区启动，自己绘制界面，做 recovery 该做的事 —— 打开 data 分区、安装刷机包、备份分区、清除数据、挂载分区，以及把存储交给电脑。
+
+这个仓库把它带到一台手机上：**小米 13 Pro**（代号 `nuwa`）。上游支持的其它机型见 [kirklin/skyward](https://github.com/kirklin/skyward)。
 
 ![在小米 13 Pro 上运行的 Skyward：关于、主页、设置和文件管理](docs/overview.webp)
 
@@ -14,43 +16,58 @@ Skyward 是使用 Rust 编写的 recovery，从零开始编写。这个分支只
   <img src="assets/time-zone.png" width="30%" alt="时区">
 </p>
 
-## 功能
+## 它能做什么
 
-- 解密 data 分区
-- 安装刷机包、系统更新包和分区镜像，支持内部存储、U 盘和 adb sideload
-- 在线系统更新
-- 备份和恢复
-- 清除数据、恢复出厂设置
-- 挂载分区，修复和格式化文件系统
-- 文件管理和终端
-- 连接 WLAN
-- MTP 文件传输、adb 和 fastbootd
-- 重启到系统、recovery、fastboot、bootloader 和 EDL，切换启动槽位
-- 浅色和深色模式，简体中文、繁体中文和英文
+- **打开 data 分区**：通过手机自己的密钥服务取硬件包裹的密钥，支持文件级加密，以及锁屏保护的用户个人文件。
+- **安装**刷机包、完整系统更新包和分区镜像，来源可以是内部存储、U 盘或 `adb sideload`。
+- **备份与恢复**分区和文件，每个备份都会校验。
+- **清除数据**，格式化和修复文件系统。
+- **挂载**当前槽位的分区，切换槽位。
+- **文件管理与终端**：文件管理器、shell 和内核日志。
+- **把存储交给电脑**（MTP），同时提供 adb 和 fastbootd。
+- **连接 WLAN**，直接从网络检查更新。
+- **双系统**：在 data 分区里养第二个系统。
+- **自我更新**：从自己的 Releases 安装新版本。
+- 浅色与深色主题；简体中文、繁体中文和英文。
 
-## 支持的机型
+| | 在这台手机上 |
+| --- | --- |
+| 启动、界面、触摸、按键 | 已验证 |
+| 打开 data 分区 | 已验证（密钥由 Android 17 写出，手机运行 16） |
+| adb | 已验证 |
+| 安装、MTP、fastbootd、WLAN、备份与恢复、双系统、在线更新 | 继承自 0.2.0，尚未在此机型上实测 |
 
-| 机型 | 代号 | 测试的系统版本 |
-| --- | --- | --- |
-| 小米 13 Pro | `nuwa` | OS4.0.24.0.XEOCNXM（Android 17） |
+## 刷入
 
-镜像基于原厂 OS3.0.312.0.WMBCNXM 的 recovery 构建，即 `devices/nuwa.toml` 中指定的版本。
-
-## 安装
-
-Skyward 需要已解锁的 bootloader。从本仓库的 [Releases](https://github.com/pubglite55/skyward-for-nuwa/releases) 下载 zip（由 `nuwa-v*` 标签发布），文件名形如 `skyward-nuwa-<版本>-<原厂版本>`。使用 `SHA256SUMS.txt` 核对并解压之后，在手机处于 fastboot 模式的时候，把其中的镜像刷入当前运行槽位的 recovery 分区：
+只需要已解锁的 bootloader。从 [Releases](https://github.com/pubglite55/skyward-for-nuwa/releases) 下载 zip（由 `nuwa-v*` 标签发布，文件名形如 `skyward-nuwa-<版本>-<原厂版本>`），用 `SHA256SUMS.txt` 核对，解压后把其中的镜像刷入手机当前槽位的 recovery 分区：
 
 ```sh
 unzip skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip
-fastboot flash recovery skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
+fastboot flash recovery_a skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
+fastboot flash recovery_b skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
 fastboot reboot recovery
 ```
 
-之后可以在 Skyward 自己的“安装”页面安装解压出来的新版镜像。打开 **自动重新刷入 Skyward** 之后，系统更新或者刷机包覆盖 recovery 分区的时候，Skyward 会重新刷回这些分区。
+之后新版本解压后可以直接在 Skyward 的「安装」页刷入。打开 **自动重新刷入 Skyward** 之后，系统更新或覆盖 recovery 分区的刷机包会把 Skyward 刷回去。
 
-super 中没有系统的时候，Skyward 仍然可以启动：屏幕和按键、adb、`adb sideload` 和 fastbootd 都能使用，足够装回一个系统。触摸、WLAN 和解密依赖已安装系统中的程序，系统装回之后随之恢复。
+刷 recovery 不会改动系统，OTA 也照常可用；要回到原厂 recovery，刷回原厂镜像即可。
 
-Skyward 中的 adb 是 root shell，手机上无需授权：手机处于 recovery 的时候，任何人拿到手机和数据线都能访问其中的存储。
+## 页面
+
+| 页面 | 用途 |
+| --- | --- |
+| 解密 | 说明数据分区为什么还关着；需要时提供输入锁屏密码的地方 |
+| 主页 | 手机状态，以及通往其它页面的入口 |
+| 文件 | 文件管理器，覆盖内部存储、U 盘和当前槽位的分区 |
+| 安装 | 刷机包与镜像：从某个位置、U 盘或 `adb sideload` |
+| 备份 | 把分区和文件备份，以及从备份恢复 |
+| 挂载 | 当前槽位的分区：挂载、卸载、格式化、修复 |
+| 清除 | 数据、缓存，以及手机自己的日志 |
+| 双系统 | 在 data 分区里安装、切换、移除第二个系统 |
+| 工具 | 终端、内核日志、recovery 自己的日志 |
+| 设置 | 主题、语言、时区、息屏时间、振动、文件传输 |
+| 重启 | 系统、recovery、fastboot、bootloader、EDL，以及启动哪个槽位 |
+| 关于 | 版本、手机信息、项目来源 |
 
 ## 解密
 
@@ -71,48 +88,22 @@ skyward: the data partition is open: f2fs at /data
 skyward: the data partition stays closed: ... it was made by key format generation 4 ...
 ```
 
+## 出问题时
+
+**数据分区一直关着。** 看上面日志里的 `generation N`：密钥是由那个代际的构建造出来的，recovery 必须为那个构建说话 —— 这就是 `devices/nuwa.toml` 里 `build_release` 和 `build_patch` 的作用。
+
+**它要求输入密码。** 那是用户个人文件的锁屏密码，就是开机时用的那个；分区本身不需要密码就能打开。
+
+**系统更新之后 Skyward 没了。** 在设置里打开 **自动重新刷入 Skyward**，或者重新刷一次镜像 —— 原厂 OTA 会重写 recovery 分区。
+
+**开不了机，但手机没坏。** 电源 + 音量上进入 recovery，电源 + 音量下进入 fastboot。super 里没有系统时 Skyward 依然能启动，屏幕、按键、adb 和 fastbootd 都在，足够装回一个系统。
+
+**adb 不用授权就能访问存储。** 这是设计如此：Skyward 里的 adb 是不需要确认的 root shell。手机处于 recovery 时，任何人拿到手机和数据线都能访问其中的存储。
+
 ## 构建
 
-Skyward 使用 `rust-toolchain.toml` 指定的稳定版 Rust 和它的 `aarch64-linux-android` 目标、Android NDK r29 和 [cargo-ndk](https://github.com/bbqsrc/cargo-ndk) 构建。recovery 服务针对手机构建，打包工具针对电脑构建：
+构建需要 `rust-toolchain.toml` 指定的稳定版 Rust、它的 `aarch64-linux-android` 目标、Android NDK r29 和 [cargo-ndk](https://github.com/bbqsrc/cargo-ndk)。镜像基于 `devices/nuwa.toml` 指定的原厂 recovery 构建，从小米自己的更新包里取出并核对 SHA-256。命令、测试和预览工具见 [docs/BUILDING.md](docs/BUILDING.md)。
 
-```sh
-cargo ndk -t arm64-v8a --platform 30 build --release -p skyward
-cargo build --release -p skyward-pack
-```
+## 来源
 
-打包工具从小米服务器上这个版本的完整更新包中取出原厂 recovery 分区，只读取这个分区所在的部分，并且按照设备配置文件核对 SHA-256：
-
-```sh
-target/release/skyward-pack stock --config devices/nuwa.toml --out target/stock/nuwa/recovery.img
-```
-
-然后在它的基础上构建镜像：
-
-```sh
-target/release/skyward-pack recovery \
-  --stock target/stock/nuwa/recovery.img \
-  --binary target/aarch64-linux-android/release/skyward \
-  --config devices/nuwa.toml \
-  --font resources/fonts/MiSansVF.ttf \
-  --mono resources/fonts/KirkMono-Regular.ttf \
-  --mono-license resources/fonts/KirkMono-OFL.txt \
-  --out target/skyward-nuwa.img
-```
-
-测试和代码检查在电脑上运行；只在手机上运行的代码按照手机目标检查：
-
-```sh
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo ndk -t arm64-v8a --platform 30 clippy -p skyward -p skyward-install -- -D warnings
-```
-
-`skyward-preview` 无需手机，在电脑上把页面绘制成 PNG 文件：每个页面完整绘制成长截图的样子，覆盖它可能处于的各种状态，另外还有触摸和动画过程中某些时刻的屏幕。`--lang` 按照地区代码选择语言，例如 `en` 或者 `zh-TW`：
-
-```sh
-cargo run --release -p skyward-preview -- target/preview --lang en
-```
-
-## 许可证
-
-[GPL-3.0-or-later](LICENSE)
+Skyward 来自 [kirklin/skyward](https://github.com/kirklin/skyward)，作者 kirklin 及其贡献者；这个分支跟随 0.2.0，保留本机型的配置与解密工作。许可证为 [GPL-3.0-or-later](LICENSE)。
