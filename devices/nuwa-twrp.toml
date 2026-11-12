@@ -171,19 +171,6 @@ ready_property = "vendor.sys.listeners.registered"
 user = "root"
 groups = ["root", "drmrpc"]
 
-# The key store, and the service it offers to programs that speak the newer
-# key interface: on a phone whose own key service is of an older kind, or
-# whose keys were made by another build, this is the one that adapts them.
-# The phone's own programs and its TWRP both open the data partition
-# through it.
-[[service]]
-path = "/system/bin/keystore2"
-args = ["/tmp/misc/keystore"]
-libraries = ["/system/lib64"]
-ready_service = "android.security.compat.IKeystoreCompatService/default"
-user = "root"
-groups = ["root"]
-
 # The key service, the only thing that can use keys the phone wrapped in
 # hardware. Decryption of the data partition needs it.
 [[service]]
