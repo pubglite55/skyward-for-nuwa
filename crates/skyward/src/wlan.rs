@@ -673,10 +673,19 @@ fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
         for file in &cfg.firmware {
             if let Err(e) = place(file) {
                 // A file the phone works without is there to be used when it
-                // is there: a wiped persist holds no MAC address, and the
-                // driver comes up with its own rather than not at all.
+                // is there: a persist that was wiped keeps no address, and
+                // one is made up for this start rather than none at all.
                 ensure!(file.optional, "{e:#}");
-                skyward_sys::kmsg(&format!("{} is not there, and {} comes up without it: {e:#}", file.name, cfg.interface))?;
+                if file_name(file) == Some(MAC_FILE) {
+                    let mac = place_made_up_mac(file)?;
+                    skyward_sys::kmsg(&format!(
+                        "persist keeps no address for {}; it comes up with {} made up for this start",
+                        cfg.interface,
+                        mac_shown(mac)
+                    ))?;
+                } else {
+                    skyward_sys::kmsg(&format!("{} is not there, and {} comes up without it: {e:#}", file.name, cfg.interface))?;
+                }
             }
         }
         for path in skyward_modules::load(modules, &cfg.modules)? {
@@ -711,6 +720,72 @@ fn place(file: &Firmware) -> Result<()> {
         }
     };
     fs::write(&to, bytes).with_context(|| format!("write {}", to.display()))
+}
+
+/// The name the driver asks its address file by.
+const MAC_FILE: &str = "wlan_mac.bin";
+
+/// The name a firmware file is asked for by, without the folders under the
+/// loader's.
+fn file_name(file: &Firmware) -> Option<&str> {
+    Path::new(&file.name).file_name().and_then(|name| name.to_str())
+}
+
+/// Put an address of this phone's own where the loader looks, for a phone
+/// whose persist keeps none, and give it. Nothing is written to persist: the
+/// file goes beside the rest of the firmware, in the recovery's memory.
+fn place_made_up_mac(file: &Firmware) -> Result<[u8; 6]> {
+    let serial = ["ro.serialno", "ro.boot.serialno"]
+        .iter()
+        .find_map(|name| skyward_sys::prop(name))
+        .filter(|serial| !serial.is_empty())
+        .unwrap_or_default();
+    let mac = made_up_mac(&serial);
+    let to = Path::new(FIRMWARE).join(&file.name);
+    if let Some(dir) = to.parent() {
+        fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
+    }
+    fs::write(&to, mac_text(mac)).with_context(|| format!("write {}", to.display()))?;
+    Ok(mac)
+}
+
+/// An address for a phone that keeps none: one machine rather than a group,
+/// local to this phone rather than one a maker gave out, and the same from
+/// one start of the recovery to the next, drawn from the phone's serial
+/// number.
+fn made_up_mac(serial: &str) -> [u8; 6] {
+    // FNV-1a: short enough to keep here, and it spreads a serial number well.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in serial.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let mut mac = [0u8; 6];
+    for (i, byte) in mac.iter_mut().enumerate() {
+        *byte = (hash >> (8 * i)) as u8;
+    }
+    mac[0] = (mac[0] & 0xfe) | 0x02;
+    mac
+}
+
+/// The address as a phone writes it down: `02:1a:2b:3c:4d:5e`.
+fn mac_shown(mac: [u8; 6]) -> String {
+    let mut text = String::with_capacity(17);
+    for (i, byte) in mac.iter().enumerate() {
+        if i > 0 {
+            text.push(':');
+        }
+        text.push_str(&format!("{byte:02x}"));
+    }
+    text
+}
+
+/// The address as a working phone's file carries it: written out, and a
+/// newline, eighteen bytes, which is the size such a file has.
+fn mac_text(mac: [u8; 6]) -> String {
+    let mut text = mac_shown(mac);
+    text.push('\n');
+    text
 }
 
 /// Start the supplicant on the interface, and wait for its control socket.
@@ -772,4 +847,37 @@ fn end(child: &mut Child, control: Option<&Control>) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_address_made_up_is_one_machine_and_the_phones_own() {
+        let mac = made_up_mac("0a1b2c3d4e5f");
+        assert_eq!(mac[0] & 0x01, 0, "one machine rather than a group");
+        assert_eq!(mac[0] & 0x02, 0x02, "local to this phone rather than one a maker gave out");
+        assert_eq!(mac, made_up_mac("0a1b2c3d4e5f"), "the same phone keeps the same address");
+        assert_ne!(mac, made_up_mac("0a1b2c3d4e60"), "another phone gets another");
+    }
+
+    #[test]
+    fn the_address_is_written_as_a_working_phones_file_carries_it() {
+        let text = mac_text([0x02, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]);
+        assert_eq!(text, "02:1a:2b:3c:4d:5e\n");
+        assert_eq!(text.len(), 18, "the size such a file has");
+        assert_eq!(mac_shown([0x02, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]), "02:1a:2b:3c:4d:5e");
+    }
+
+    #[test]
+    fn a_firmware_file_is_known_by_the_name_under_the_loaders_folders() {
+        let file = Firmware {
+            name: "wlan/qca_cld/kiwi_v2/wlan_mac.bin".into(),
+            path: "kiwi_v2/wlan_mac.bin".into(),
+            partition: Some("persist".into()),
+            optional: true,
+        };
+        assert_eq!(file_name(&file), Some(MAC_FILE));
+    }
 }

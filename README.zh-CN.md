@@ -42,9 +42,9 @@ Skyward 是用 Rust 从零编写的 Android recovery：没有 TWRP 的框架，�
 只需要已解锁的 bootloader。从 [Releases](https://github.com/pubglite55/skyward-for-nuwa/releases) 下载 zip（由 `nuwa-v*` 标签发布，文件名形如 `skyward-nuwa-<版本>-<原厂版本>`），用 `SHA256SUMS.txt` 核对，解压后把其中的镜像刷入手机当前槽位的 recovery 分区：
 
 ```sh
-unzip skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip
-fastboot flash recovery_a skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
-fastboot flash recovery_b skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
+unzip skyward-nuwa-v1.6-OS3.0.312.0.WMBCNXM.zip
+fastboot flash recovery_a skyward-nuwa-v1.6-OS3.0.312.0.WMBCNXM.img
+fastboot flash recovery_b skyward-nuwa-v1.6-OS3.0.312.0.WMBCNXM.img
 fastboot reboot recovery
 ```
 

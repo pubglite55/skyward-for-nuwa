@@ -55,9 +55,9 @@ unzip it, and flash the image inside to the recovery partition of the slot the
 phone runs from:
 
 ```sh
-unzip skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip
-fastboot flash recovery_a skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
-fastboot flash recovery_b skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.img
+unzip skyward-nuwa-v1.6-OS3.0.312.0.WMBCNXM.zip
+fastboot flash recovery_a skyward-nuwa-v1.6-OS3.0.312.0.WMBCNXM.img
+fastboot flash recovery_b skyward-nuwa-v1.6-OS3.0.312.0.WMBCNXM.img
 fastboot reboot recovery
 ```
 

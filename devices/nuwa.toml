@@ -123,8 +123,8 @@ groups = ["system", "uhid", "input"]
 # with the modem's, as the 13 Ultra's does, so the settings and the MAC
 # address are given to the loader again: the settings from the vendor
 # partition, the address from where the vendor's link points in persist —
-# where a persist that was wiped no longer keeps it, and the driver comes up
-# with an address of its own rather than not at all.
+# where a persist that was wiped no longer keeps it, and one is made up for
+# this start from the phone's serial number rather than none at all.
 [wlan]
 modules = ["qca_cld3_kiwi_v2"]
 writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
