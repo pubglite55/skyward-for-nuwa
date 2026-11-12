@@ -129,17 +129,29 @@ fn open(service: &KeyMint) -> Result<Opened> {
 }
 
 /// Map the data partition decrypted, under the key the phone keeps for it,
-/// and give its table's entries, the first the one the key is found by,
-/// and the device the filesystem is read and written through.
+/// and give its table's entries and the device the filesystem is read and
+/// written through.
 fn map(service: &KeyMint) -> Result<(Vec<Entry>, PathBuf)> {
     let entries = skyward_block::fstab::read(MOUNT)?;
-    let entry = entries.first().with_context(|| format!("the phone's own table says nothing about {MOUNT}"))?;
+    let entry = encryption_entry(&entries)?;
     let encryption = Encryption::of(entry)?;
     let device = skyward_block::fstab::device(entry)?;
     let key = storage_key(service, entry, &encryption)?;
     let sectors = skyward_block::size_bytes(&device)? / 512;
     let mapped = dm::create(MAPPED, &[target(&device, sectors, &key, &encryption)], false)?;
     Ok((entries, mapped))
+}
+
+/// The entry the key for the partition is found by: the one that says how
+/// the partition is encrypted whole. A phone may name the partition once per
+/// filesystem it might hold, and only the one it holds says so; the others
+/// are there for the filesystem that is not. Where no entry says it, the
+/// first is given, so that what the phone does say is what the error names.
+fn encryption_entry(entries: &[Entry]) -> Result<&Entry> {
+    match entries.iter().find(|e| e.extra("metadata_encryption").is_some()) {
+        Some(entry) => Ok(entry),
+        None => entries.first().with_context(|| format!("the phone's own table says nothing about {MOUNT}")),
+    }
 }
 
 /// Map the data partition decrypted without mounting it, for its
@@ -609,6 +621,25 @@ mod tests {
     fn the_key_is_in_a_directory_under_the_one_the_phone_names() {
         let e = entry("keydirectory=/metadata/vold/metadata_encryption");
         assert_eq!(key_dir(&e).unwrap(), Path::new("/metadata/vold/metadata_encryption/key"));
+    }
+
+    #[test]
+    fn the_key_is_found_by_the_entry_that_says_how_the_partition_is_encrypted() {
+        let mut other = entry("latemount,keydirectory=/metadata/vold/metadata_encryption");
+        other.filesystem = "mifs".into();
+        let encrypted = entry("latemount,metadata_encryption=adiantum,keydirectory=/metadata/vold/metadata_encryption");
+        let both = [other, encrypted.clone()];
+        assert_eq!(encryption_entry(&both).unwrap(), &encrypted, "the one that says it, not the first");
+        let only = [entry("latemount,quota")];
+        assert_eq!(encryption_entry(&only).unwrap(), &only[0], "where none says it, the first");
+        assert!(encryption_entry(&[]).is_err(), "a table with no entry for the partition at all");
+    }
+
+    #[test]
+    fn a_partition_whose_entries_say_nothing_of_encryption_is_refused_as_before() {
+        let none = [entry("latemount,quota")];
+        let error = Encryption::of(encryption_entry(&none).unwrap()).unwrap_err();
+        assert!(format!("{error:#}").contains("not encrypted whole"), "{error:#}");
     }
 
     #[test]

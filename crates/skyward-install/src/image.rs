@@ -214,7 +214,10 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
     ensure!(len <= size, "the image is {len} bytes, more than the {size} its partition holds");
 
     let mut footer = [0u8; FOOTER_LEN as usize];
-    let moved = len >= FOOTER_LEN && len < size && {
+    // There must be room for the footer beyond the image's end; with less
+    // than FOOTER_LEN left, size - len - FOOTER_LEN would underflow and the
+    // footer would never reach the partition's end.
+    let moved = len >= FOOTER_LEN && size - len >= FOOTER_LEN && {
         image.seek(SeekFrom::Start(len - FOOTER_LEN)).context("seek to the image's end")?;
         image.read_exact(&mut footer).context("read the image's end")?;
         footer.starts_with(FOOTER_MAGIC)
@@ -475,6 +478,24 @@ mod tests {
         image.resize(8192, 0x44);
         flash_all(&image, &slots).unwrap();
         assert_eq!(std::fs::read(&slots[0]).unwrap(), image);
+    }
+
+    /// An image that leaves 16 bytes of the partition free still ends in a
+    /// footer. There is no room to move it to the partition's end, so the
+    /// image is written as it is and the remaining bytes are untouched.
+    #[test]
+    fn an_image_leaving_less_than_a_footer_of_room_is_written_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let size = 8192;
+        let len = size - 16;
+        let slots = [partition(dir.path(), "boot_a", size)];
+        let mut image = vec![0x55u8; len];
+        let at = len - FOOTER_LEN as usize;
+        image[at..at + FOOTER_MAGIC.len()].copy_from_slice(FOOTER_MAGIC);
+        flash_all(&image, &slots).unwrap();
+        let got = std::fs::read(&slots[0]).unwrap();
+        assert_eq!(&got[..len], &image[..], "with no room to move it, the footer stays in place");
+        assert!(got[len..].iter().all(|&b| b == 0xaa), "the bytes past the image are left alone");
     }
 
     #[test]

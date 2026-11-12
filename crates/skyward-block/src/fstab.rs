@@ -31,6 +31,11 @@ impl Entry {
 
 /// Every filesystem a table names. A phone may name the same mount point
 /// more than once, once per filesystem it might hold.
+///
+/// A line names the device, the mount point, the filesystem and how to mount
+/// it, then the phone's own word on it. That last part is not always there,
+/// and some tables put more after it; the first five parts are all that mean
+/// anything here, and a line with fewer than four is not an entry at all.
 pub fn entries(text: &str) -> Vec<Entry> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -39,13 +44,20 @@ pub fn entries(text: &str) -> Vec<Entry> {
             continue;
         }
         let fields: Vec<&str> = line.split_whitespace().collect();
-        let [device, mount_point, filesystem, options, extras] = fields[..] else { continue };
+        if fields.len() < 4 {
+            continue;
+        }
+        let (device, mount_point, filesystem, options) = (fields[0], fields[1], fields[2], fields[3]);
+        let extras = match fields.get(4).copied() {
+            Some(extras) => extras.split(',').map(str::to_string).collect(),
+            None => Vec::new(),
+        };
         out.push(Entry {
             device: device.to_string(),
             mount_point: mount_point.to_string(),
             filesystem: filesystem.to_string(),
             options: options.split(',').map(str::to_string).collect(),
-            extras: extras.split(',').map(str::to_string).collect(),
+            extras,
         });
     }
     out
@@ -162,8 +174,25 @@ mod tests {
     }
 
     #[test]
-    fn comments_and_short_lines_are_passed_over() {
-        assert!(entries("# nothing\n\n/dev/x /y f2fs rw\n").is_empty());
+    fn comments_and_lines_too_short_to_be_entries_are_passed_over() {
+        assert!(entries("# nothing\n\n/dev/x /y f2fs\n").is_empty());
         assert_eq!(entries(TABLE).len(), 3);
+    }
+
+    #[test]
+    fn an_entry_can_leave_out_what_the_phone_says_beyond_how_to_mount_it() {
+        let entry = &entries("/dev/block/bootdevice/by-name/cache /cache ext4 noatime\n")[0];
+        assert_eq!(entry.mount_point, "/cache");
+        assert_eq!(entry.options, ["noatime"]);
+        assert!(entry.extras.is_empty(), "no word on it beyond how to mount it");
+    }
+
+    #[test]
+    fn parts_past_the_first_five_are_not_read() {
+        let line = "/dev/block/bootdevice/by-name/userdata /data f2fs noatime,discard \
+                    latemount,quota extra=more\n";
+        let entry = &entries(line)[0];
+        assert_eq!(entry.extras, ["latemount", "quota"]);
+        assert_eq!(entry.extra("extra"), None, "a sixth part is not the phone's word on it");
     }
 }

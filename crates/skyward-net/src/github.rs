@@ -51,6 +51,8 @@ impl Build {
 #[derive(Deserialize)]
 struct Release {
     tag_name: String,
+    /// GitHub leaves the key out altogether while a release has no assets.
+    #[serde(default)]
     assets: Vec<Asset>,
 }
 
@@ -72,13 +74,21 @@ struct Message {
 }
 
 /// A version as a release names it: `1.5` is 1.5.0, because the semver crate
-/// wants all three parts and this fork's tags carry two.
+/// wants all three parts and this fork's tags carry two. Either side of a
+/// comparison may carry a leading `v` or a prerelease tail.
 fn version_of(text: &str) -> Result<semver::Version> {
-    let padded = match text.matches('.').count() {
-        0 => format!("{text}.0.0"),
-        1 => format!("{text}.0"),
-        _ => text.to_string(),
-    };
+    let text = text.strip_prefix('v').unwrap_or(text);
+    let (core, pre) = text.split_once('-').unwrap_or((text, ""));
+    let parts: Vec<&str> = core.split('.').collect();
+    ensure!(!parts.is_empty() && parts.len() <= 3, "{text} is not a version");
+    let mut padded = parts.join(".");
+    for _ in parts.len()..3 {
+        padded.push_str(".0");
+    }
+    if !pre.is_empty() {
+        padded.push('-');
+        padded.push_str(pre);
+    }
     semver::Version::parse(&padded).with_context(|| format!("{text} is not a version"))
 }
 
@@ -88,22 +98,35 @@ fn version_of(text: &str) -> Result<semver::Version> {
 pub fn newest(answer: &str, codename: &str, running: &str) -> Result<Newest> {
     let release: Release = serde_json::from_str(answer).context("read GitHub's answer")?;
     let tag = release.tag_name;
-    // This fork tags its releases with the phone's name in front, `nuwa-v1.5`;
-    // upstream tags `v0.1.4`. The version is what follows the v either way.
-    let named = tag.strip_prefix("nuwa-").unwrap_or(&tag);
+    // A fork tags its releases with the phone's name in front, `nuwa-v1.5`;
+    // upstream tags `v0.1.4`. The version starts at the v either way. The
+    // prefix cannot be taken from `codename`: a release of one phone is
+    // still read when another phone asks after it.
+    let named = match tag.find("-v") {
+        Some(at) => &tag[at + 1..],
+        None => tag.as_str(),
+    };
     let version = named.strip_prefix('v').with_context(|| format!("the newest release is tagged {tag}, which is not v and a version"))?;
     let newest = version_of(version).with_context(|| format!("the newest release is tagged {tag}"))?;
     let this = version_of(running).with_context(|| format!("this build's version is {running}"))?;
     // Upstream names each zip skyward-, the tag, the phone's codename, and the
     // stock build; this fork names it skyward-, the tag — which carries the
-    // codename already — and the stock build.
+    // codename already — and the stock build. Only a plain file name is
+    // taken: it is joined to the recovery's own folder later on.
     let prefixed = format!("skyward-{tag}-{codename}-");
     let tagged = format!("skyward-{tag}-");
     let named_in_tag = tag.split('-').any(|part| part == codename);
+    ensure!(!release.assets.is_empty(), "the newest release holds no assets yet");
     let found = release
         .assets
         .into_iter()
-        .find(|a| a.name.ends_with(".zip") && (a.name.starts_with(&prefixed) || (named_in_tag && a.name.starts_with(&tagged))));
+        .find(|a| {
+            a.name.ends_with(".zip")
+                && !a.name.contains('/')
+                && !a.name.contains('\\')
+                && !a.name.contains("..")
+                && (a.name.starts_with(&prefixed) || (named_in_tag && a.name.starts_with(&tagged)))
+        });
     let build = match found {
         None => None,
         Some(a) => {
@@ -290,5 +313,34 @@ mod tests {
         let untagged = ANSWERED_013.replace("\"tag_name\":\"v0.1.3\"", "\"tag_name\":\"nightly\"");
         assert!(newest(&untagged, "ishtar", "0.1.2").is_err());
         assert!(newest("{}", "ishtar", "0.1.2").is_err());
+    }
+
+    #[test]
+    fn a_version_is_read_with_a_v_or_a_prerelease_but_not_four_parts() {
+        assert_eq!(version_of("v1.5").unwrap(), semver::Version::parse("1.5.0").unwrap());
+        assert_eq!(version_of("1.5-rc.1").unwrap(), semver::Version::parse("1.5.0-rc.1").unwrap());
+        assert_eq!(version_of("0.1.3-rc.1").unwrap(), semver::Version::parse("0.1.3-rc.1").unwrap());
+        assert!(version_of("1.5.0.1").is_err(), "semver has three parts, not four");
+        assert!(newest(ANSWERED_NUWA_15, "nuwa", "v1.4").unwrap().newer, "a build's own v is read too");
+    }
+
+    #[test]
+    fn a_tag_named_for_another_phone_is_read_the_same_way() {
+        let other = ANSWERED_NUWA_15.replace("nuwa-v1.5", "ishtar-v1.5");
+        let n = newest(&other, "ishtar", "1.4").unwrap();
+        assert_eq!(n.version, "1.5");
+        assert!(n.build.is_some(), "the zip is named after the tag, not a bare codename");
+        // A release of one phone is still read when another asks after it.
+        assert_eq!(newest(ANSWERED_NUWA_15, "ishtar", "1.0").unwrap().build, None);
+    }
+
+    #[test]
+    fn a_release_with_no_assets_says_so_and_a_name_cannot_escape() {
+        let empty = r#"{"tag_name":"nuwa-v1.5","assets":[]}"#;
+        assert!(newest(empty, "nuwa", "1.4").unwrap_err().to_string().contains("no assets"));
+        let absent = r#"{"tag_name":"nuwa-v1.5"}"#;
+        assert!(newest(absent, "nuwa", "1.4").unwrap_err().to_string().contains("no assets"));
+        let escaping = ANSWERED_NUWA_15.replace("skyward-nuwa-v1.5-OS3.0.312.0.WMBCNXM.zip", "skyward-nuwa-v1.5-../../x.zip");
+        assert_eq!(newest(&escaping, "nuwa", "1.4").unwrap().build, None);
     }
 }

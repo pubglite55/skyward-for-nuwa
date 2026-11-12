@@ -5,7 +5,7 @@
 - 仓库：https://github.com/pubglite55/skyward-for-nuwa
 - 上游：https://github.com/kirklin/skyward（本仓库基于 **0.2.0**）
 - 当前最新 Release：**nuwa-v1.5**（2026-11-12 重建，含自更新修复）
-- 当前 `main` 头：`3a0a54d`（写这份文档时；以实际为准）
+- 当前发布分支 `fork/main` 头：`dfe8f4e`（2026-11-12 交接文档那次提交；本地工作分支 `upstream-merge` 与之完全一致）
 - 设备：小米 13 Pro，代号 **nuwa**，型号 2210132C，SM8550（骁龙 8 Gen 2）
 
 ---
@@ -187,41 +187,60 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 
 ## 7. 发版流程
 
-1. 确认 `main` 上 CI 全绿，且**实机验证过**（至少：能启动、能进文件页打开 data）
-2. 打 tag 并推：
+1. 确认**我们仓库**的 `fork/main` 上 CI 全绿，且**实机验证过**（至少：能启动、能进文件页打开 data）
+   —— 注意：本地 `main` 分支追踪的是上游 `origin/main`，不是发布分支（见 §8）
+2. 打 tag 并推到 `fork`：
    ```sh
-   git tag nuwa-v1.5 HEAD && git push origin nuwa-v1.5
+   git tag nuwa-v1.5 HEAD && git push fork nuwa-v1.5
    ```
+   **`origin` 指向上游 kirklin/skyward**；往那里推 tag 不会触发本仓库的发布工作流。所有推送都要显式写 `fork`。
 3. `release-nuwa.yml` 自动构建并发布；若**同名 Release 已存在**，它会 `gh release upload --clobber` 覆盖资产（不会新建）
-4. 需要改说明：`gh release edit nuwa-v1.5 --notes-file notes.md`
-5. **替换某个版本**的正确姿势：`git tag -d nuwa-v1.5 && git tag nuwa-v1.5 <sha> && git push -f origin nuwa-v1.5`
+4. 需要改说明：`gh release edit nuwa-v1.5 --notes-file notes.md --repo pubglite55/skyward-for-nuwa`
+5. **替换某个版本**的正确姿势：`git tag -d nuwa-v1.5 && git tag nuwa-v1.5 <sha> && git push -f fork nuwa-v1.5`
    —— 会触发一次新的构建并覆盖同名资产（已在 2026-11-12 用过两次）
 
 **纪律（用户明确要求过）**：
 - 没在真机验证过的构建**不许打 tag**、不许建 Release
-- 实验性版本不发布；发过的坏版本要删（`gh release delete <tag> --cleanup-tag --yes`）
+- 实验性版本不发布；发过的坏版本要删（`gh release delete <tag> --cleanup-tag --yes --repo pubglite55/skyward-for-nuwa`）
 - 不要改我们仓库的名字（曾因腾位 fork 改名被叫停）
+- 所有 `gh` 命令都带 `--repo pubglite55/skyward-for-nuwa`：默认 remote 是 `origin`（上游），不写会操作错仓库
 
 ---
 
 ## 8. 开发环境与工具（这台机器）
 
+**两个目录要分清**：仓库已迁到 `C:/Users/L1872/Desktop/nuwa recovery/skyward`；工具与凭据仍留在 `C:/Users/L1872/Desktop/nuwa ios/`。旧路径 `nuwa ios/work/skyward` 已不存在，旧版文档里的相对路径（`./.tools/`、`work/t.txt`）都以 `nuwa ios/` 为基准，从新仓库目录执行会失效 —— 下面一律写绝对路径。
+
 - 平台：Windows + Git Bash；**WSL 已被清空，本地没有 Rust 工具链** → 一切编译走 GitHub Actions
-- `adb` / `fastboot`：`./.tools/platform-tools/`（在 `C:/Users/L1872/Desktop/nuwa ios/`）
-- `gh`：`./.tools/bin/gh.exe`；token 在 `work/t.txt`
+- `adb` / `fastboot`：`C:/Users/L1872/Desktop/nuwa ios/.tools/platform-tools/`
+- `gh`：`C:/Users/L1872/Desktop/nuwa ios/.tools/bin/gh.exe`；token 在 `C:/Users/L1872/Desktop/nuwa ios/work/t.txt`
 - 代理：`http://127.0.0.1:7890`，**时有时无**：
   - `api.github.com` 直连可通（`HTTPS_PROXY= gh api ...`）
   - `github.com` 与 Release 下载需要代理
   - **Actions artifact 必须走代理 curl 才快**（直连 ~60 KB/s，代理 ~1.5 MB/s）：
     ```sh
     curl -s -L -x http://127.0.0.1:7890 --retry 2 --retry-all-errors -C - \
-      -H "Authorization: Bearer $(cat work/t.txt)" -H "Accept: application/vnd.github+json" \
+      -H "Authorization: Bearer $(cat 'C:/Users/L1872/Desktop/nuwa ios/work/t.txt')" \
+      -H "Accept: application/vnd.github+json" \
       -o out.zip "https://api.github.com/repos/pubglite55/skyward-for-nuwa/actions/artifacts/<id>/zip"
     ```
-- 真机刷写：`adb reboot bootloader` → `fastboot flash recovery_a/b <img>` → `fastboot reboot recovery`
+- 真机刷写：`adb reboot bootloader` → `fastboot flash recovery_a/b <img>` → `fastboot reboot recovery`（`adb`/`fastboot` 不在 PATH，实际执行用 §12 的绝对路径形式）
   - **`fastboot reboot recovery` 偶发弹回 fastboot**；可靠路径是 `fastboot reboot` → 进系统 → `adb reboot recovery`
 - 取日志：`adb shell dmesg | grep 'skyward:'`
-- 本地仓库路径：`C:/Users/L1872/Desktop/nuwa ios/work/skyward`（remote `pr` = 我们的 main）
+
+**remote 与分支（改动前务必看清）**：
+
+| 名称 | 指向 | 用途 |
+| --- | --- | --- |
+| `fork` | `pubglite55/skyward-for-nuwa` | **我们的仓库**；`fork/main` 是发布分支，tag 与推送都走这里 |
+| `origin` | `kirklin/skyward` | **上游**，只读参考；**不要往这里推** |
+| `aurora-pr` / `guobao` | 两个旁支仓库 | 实验 / 协作，与发版无关 |
+
+本地分支名有误导性：
+- 当前工作分支是 `upstream-merge`，虽追踪 `origin/main`，但 HEAD `dfe8f4e` 与 `fork/main` 完全一致，工作区干净。
+- 本地 `main` 追踪的是**上游** `origin/main`（已落后 61 个提交），**不是**我们的发布分支；`git checkout main` 会切到上游代码。
+- 本地 `pr`、`nuwa`、`aurora*` 等是历史分支。旧版文档写的「remote `pr` = 我们的 main」已不成立：`pr` 现在只是本地分支名，我们仓库的 remote 叫 `fork`。
+- 结论：`git push` 一律显式写 `fork`；`gh` 命令一律显式带 `--repo pubglite55/skyward-for-nuwa`。
 
 ---
 
@@ -256,45 +275,80 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | P1 | 给上游提 PR：`adopt_installed_version` 漏 `ro.vendor.build.security_patch` | 对所有“密钥比固件新”的用户都有效 |
 | P2 | 双系统（Dual boot）实测 | 会占用 data 分区，先备份 |
 | P2 | 开机自动尝试解密（可选开关） | 现在按需解密，容易被误判“解密坏了” |
-| P3 | 解密后文件页自动重列目录 | MTP 已自动跟随 `storage_open`，文件页需要手动退出重进 |
+| P3 | 解密后文件页自动重列目录 | **代码层已修，待真机验证**（见下表）；原现象：MTP 已自动跟随 `storage_open`，文件页需要手动退出重进 |
 | — | 旧版本（≤v1.4）自更新会提示一次 v1.5 | 因旧构建报告 0.2.0，更新后即正常 |
+
+**本轮未验证改动（务必先验证再发版）**：本机无 Rust 工具链，且这台手机当时 adb 协议层未建立（Windows 能看到设备、`adb devices` 为空）。以下都是工作区改动，**未经编译、未刷机、未实机验证**，推分支跑 `build.yml` 并真机验证前不要打 tag。
+
+| 文件 | 修了什么 |
+| --- | --- |
+| `crates/skyward/src/ui.rs` | P3：解密成功 / 解锁成功后重列文件页与存储选择页（不只判断栈顶页面）；自更新 zip 名只取 `file_name()` 再拼 `RUN` |
+| `crates/skyward-net/src/github.rs` | tag 前缀由写死 `nuwa-` 改为通用剥离；`version_of` 支持前导 `v` 与预发布、拒绝四段；`assets` 缺省 / 空列表明确报错；拒绝含路径的资产名 |
+| `crates/skyward-install/src/image.rs` | `flash()` 的 footer 迁移条件补上剩余空间判断，避免 `size - len - FOOTER_LEN` 无符号下溢导致 AVB footer 丢失 |
+| `crates/skyward/src/main.rs` | 配置代为声明构建值时，不再要求 installed build.prop 必须提供同名属性 |
+| `crates/skyward-net/src/release.rs` | 校验 `version` 不可穿越镜像 URL 路径；无 code 且无 latest 的回答不再被当成「服务器说没有更新」 |
+| `crates/skyward-block/src/fstab.rs` | 解析改为只取前 5 列、容忍多余列（只有 4 列也接受）；此前多一列就整行丢弃，带 `metadata_encryption` 的 `/data` 行会凭空消失 |
+| `crates/skyward-crypto/src/data.rs` | 取 `/data` 条目改为优先选带 `metadata_encryption` 的那条（原来固定取第一条；同一挂载点多条目时可能选中不带该参数的那条，报「未整盘加密」）；一条都没有时仍回落第一条，错误信息不变 |
+
+新增单元测试 9 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 2）。**验证顺序**：推分支 → `build.yml` 的 lint+test 绿 → 打包刷机 → 真机进文件页确认解密后自动重列。
 
 ---
 
 ## 11. 上手检查清单（新接手时按顺序做）
 
 1. `gh run list --repo pubglite55/skyward-for-nuwa --limit 3`：确认最新构建绿
-2. `gh release view nuwa-v1.5`：确认 Latest 资产（zip 约 43 MB + SHA256SUMS.txt）
-3. 手机接上：`adb devices` / `fastboot devices`
-4. 要验证解密：进 recovery → **点「文件」页** → `adb shell "mount | grep ' /data '"` 应看到 `dm-8 ... f2fs (rw,...,inlinecrypt)`；
+2. `gh release view nuwa-v1.5 --repo pubglite55/skyward-for-nuwa`：确认 Latest 资产（zip 约 43 MB + SHA256SUMS.txt）
+3. 确认工作分支与 `fork/main` 一致、`git status` 干净；本地 `main` 是上游镜像，别切错（见 §8）
+4. 手机接上：`adb devices` / `fastboot devices`（工具不在 PATH，用 §8、§12 的绝对路径）
+5. 要验证解密：进 recovery → **点「文件」页** → `adb shell "mount | grep ' /data '"` 应看到 `dm-8 ... f2fs (rw,...,inlinecrypt)`；
    `dmesg | grep 'skyward:'` 应有 `the data partition is open: f2fs at /data`
-5. 任何改动先 `git status`，提交后等 `build.yml` 绿；**不发版就不打 tag**
+6. 任何改动先 `git status`，提交后推到 `fork/main` 并等 `build.yml` 绿；**不发版就不打 tag**
 
 ---
 
 ## 12. 常用命令速查
 
 ```sh
-# 状态
-gh run list --repo pubglite55/skyward-for-nuwa --limit 3
-gh api repos/pubglite55/skyward-for-nuwa/actions/runs/<id>/jobs --jq '[.jobs[] | .name + ":" + (.conclusion // .status)]'
+# 前置：仓库在 nuwa recovery/skyward，工具与凭据在 nuwa ios/
+GH="C:/Users/L1872/Desktop/nuwa ios/.tools/bin/gh.exe"
+PF="C:/Users/L1872/Desktop/nuwa ios/.tools/platform-tools"
+TOKEN="C:/Users/L1872/Desktop/nuwa ios/work/t.txt"
+REPO="C:/Users/L1872/Desktop/nuwa recovery/skyward"
+IMG="out/skyward-nuwa.img"     # 改成实际镜像路径
+RUN_ID=43184098214             # 改成实际 run id
+ARTIFACT_ID=123456789          # 改成实际 artifact id
+cd "$REPO"                     # 相对路径以仓库根为准
+export GH_TOKEN="$(cat "$TOKEN")"
+export HTTPS_PROXY= HTTP_PROXY= ALL_PROXY=   # api.github.com 直连；curl 的 -x 单独指定代理
+
+# 状态（一律带 --repo，默认 remote 是上游 origin）
+"$GH" run list --repo pubglite55/skyward-for-nuwa --limit 3
+"$GH" release view nuwa-v1.5 --repo pubglite55/skyward-for-nuwa
+"$GH" api "repos/pubglite55/skyward-for-nuwa/actions/runs/$RUN_ID/jobs" \
+  --jq '[.jobs[] | .name + ":" + (.conclusion // .status)]'
 
 # 下载 artifact（走代理）
-curl -s -L -x http://127.0.0.1:7890 -H "Authorization: Bearer $(cat work/t.txt)" \
+curl -s -L -x http://127.0.0.1:7890 -H "Authorization: Bearer $(cat "$TOKEN")" \
   -H "Accept: application/vnd.github+json" -o a.zip \
-  "https://api.github.com/repos/pubglite55/skyward-for-nuwa/actions/artifacts/<id>/zip"
+  "https://api.github.com/repos/pubglite55/skyward-for-nuwa/actions/artifacts/$ARTIFACT_ID/zip"
 
-# 刷机
-adb reboot bootloader
-fastboot flash recovery_a <img> && fastboot flash recovery_b <img>
-fastboot reboot            # 再 adb reboot recovery（比 reboot recovery 可靠）
+# 刷机（adb/fastboot 不在 PATH）
+"$PF/adb.exe" reboot bootloader
+"$PF/fastboot.exe" flash recovery_a "$IMG" && "$PF/fastboot.exe" flash recovery_b "$IMG"
+"$PF/fastboot.exe" reboot   # 再 adb reboot recovery（比 reboot recovery 可靠）
 
 # 取证
-adb shell dmesg | grep 'skyward:'
-adb shell "mount | grep -E ' /data | /sdcard '"
-adb shell "ls /sdcard/DCIM"
+"$PF/adb.exe" shell dmesg | grep 'skyward:'
+"$PF/adb.exe" shell "mount | grep -E ' /data | /sdcard '"
+"$PF/adb.exe" shell "ls /sdcard/DCIM"
+
+# 分支 / remote 核对
+git -C "$REPO" remote -v
+git -C "$REPO" branch -vv
 ```
 
 ---
 
 *本文档由 2026-11-12 的工作整理：解密根因定位与修复、仓库收敛为单机型、README 重写、自更新指向本仓库、v1.5 三次重建发布。*
+
+*2026-11-12 16:41 修订：仓库迁至 `nuwa recovery/skyward` 后，更新路径、分支与 remote 描述；发版命令的推送目标由 `origin` 更正为 `fork`，`gh` 命令补上 `--repo`。*

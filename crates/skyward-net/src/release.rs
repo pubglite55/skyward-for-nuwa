@@ -160,9 +160,23 @@ pub fn release(answer: &str) -> Result<Option<Release>> {
             code.message.as_deref().map(|m| format!(" ({m})")).unwrap_or_default()
         );
     }
-    let Some(rom) = a.latest else { return Ok(None) };
+    let Some(rom) = a.latest else {
+        // An answer with neither a code nor a system is a broken one, not
+        // the server saying it knows of no update.
+        ensure!(a.code.is_some(), "the update server answered with neither a code nor a system");
+        return Ok(None);
+    };
     let name = rom.filename.split('?').next().unwrap_or_default().to_string();
-    ensure!(!name.is_empty() && !name.contains('/'), "the update server names the package {}", rom.filename);
+    ensure!(
+        !name.is_empty() && !name.contains('/') && !name.contains('\\') && !name.contains(".."),
+        "the update server names the package {}", rom.filename
+    );
+    // The version is joined into a mirror's URL path below, so it must not
+    // be able to climb out of it.
+    ensure!(
+        !rom.version.is_empty() && !rom.version.contains('/') && !rom.version.contains('\\') && !rom.version.contains(".."),
+        "the update server names the version {}", rom.version
+    );
     // A mirror that keeps to HTTPS comes before one that does not.
     let mut mirrors = a.mirrors;
     mirrors.sort_by_key(|m| !m.starts_with("https://"));
@@ -267,5 +281,14 @@ mod tests {
         assert_eq!(e.to_string(), "the update server answered 2001 (device not found)");
         let nowhere = r#"{"LatestRom":{"version":"V","filename":"a.zip","md5":"m","filesize":"1G"},"MirrorList":[]}"#;
         assert!(release(nowhere).is_err(), "a package with no place to download it from");
+    }
+
+    #[test]
+    fn an_answer_with_no_reason_and_a_version_that_escapes_are_refused() {
+        let empty = release("{}").unwrap_err();
+        assert!(empty.to_string().contains("neither a code nor a system"), "{empty}");
+        let escaping = r#"{"LatestRom":{"version":"../V","filename":"a.zip","md5":"m","filesize":"1G"},"MirrorList":["https://m"]}"#;
+        let e = release(escaping).unwrap_err();
+        assert!(e.to_string().contains("names the version"), "{e}");
     }
 }

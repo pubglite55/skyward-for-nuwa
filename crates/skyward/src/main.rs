@@ -673,15 +673,26 @@ fn adopt_installed_version(props: &std::collections::HashMap<String, String>, cf
     // not the installed system's, that goes in — the vendor build's patch
     // level included, which is the level a key is measured against.
     for name in BUILD_VERSION {
-        let installed = props.get(name).with_context(|| format!("the installed system says no {name}"))?;
-        let (value, named) = cfg.spoken_for(name, installed);
+        // The configuration may speak for this build. The installed
+        // system's value is then only what the log compares against, so a
+        // vendor build.prop leaving a property out must not keep the one
+        // the keys are measured against from being set.
+        let installed = props.get(name).map(String::as_str);
+        let (value, named) = cfg.spoken_for(name, installed.unwrap_or(""));
+        if !named {
+            // Without a value of the configuration's own, the installed
+            // system's is all there is; its absence is a real failure.
+            installed.with_context(|| format!("the installed system says no {name}"))?;
+        }
         if skyward_sys::prop(name).as_deref() != Some(value) {
             skyward_sys::set_prop(name, value)?;
         }
         if named {
-            skyward_sys::kmsg(&format!(
-                "{name} speaks for the configuration's {value}, not the installed system's {installed}"
-            ))?;
+            let against = match installed {
+                Some(was) => format!(", not the installed system's {was}"),
+                None => String::new(),
+            };
+            skyward_sys::kmsg(&format!("{name} speaks for the configuration's {value}{against}"))?;
         } else {
             skyward_sys::kmsg(&format!("{name} is the installed system's {value}"))?;
         }

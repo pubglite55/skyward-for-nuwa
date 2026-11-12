@@ -309,6 +309,21 @@ fn list_place(app: &mut App, place: Place, folder: String) -> Result<()> {
     Ok(())
 }
 
+/// Read the folders the file pages show again, once opening the data
+/// partition has made internal storage readable. They were listed while
+/// storage was still closed and have no reason of their own to list them
+/// again; MTP is offered anew on every turn of the loop, so it follows on
+/// its own. Both are refreshed whichever page is on top now, so a page the
+/// user comes back to shows the new list too.
+fn relist_after_open(app: &mut App) -> Result<()> {
+    if !app.state.place_open(Place::Storage) {
+        return Ok(());
+    }
+    list(app, app.state.files.path.clone())?;
+    let folder = app.state.folder(Screen::Choose(Place::Storage)).path.clone();
+    list_place(app, Place::Storage, folder)
+}
+
 /// Where `path`, from the top of `place`, is: internal storage is the
 /// owner's shared storage, where the data partition shows it.
 fn in_place(place: Place, path: &str) -> PathBuf {
@@ -2043,6 +2058,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     }
                     closed = opening.closed;
                     show_closed(&mut app, &closed)?;
+                    // What the file page listed before /data opened is stale.
+                    relist_after_open(&mut app)?;
                 }
                 decrypt::Ended::Opened(Err(why)) => {
                     skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
@@ -2061,6 +2078,9 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                 decrypt::Ended::Unlocked(Ok(still)) => {
                     closed = still;
                     show_closed(&mut app, &closed)?;
+                    // A screen lock being answered opens storage too, and
+                    // the same stale list needs reading again.
+                    relist_after_open(&mut app)?;
                 }
                 decrypt::Ended::Unlocked(Err(why)) => {
                     skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
@@ -2520,7 +2540,10 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         ensure!(skyward_updater.is_none(), "Skyward is being updated already");
                         ensure!(installer.is_none(), "an installer is running already");
                         skyward_sys::kmsg(&format!("updating Skyward to {}", build.name))?;
-                        let path = Path::new(skyward_sys::RUN).join(&build.name);
+                        // GitHub names the zip; join only its own name, so a
+                        // name in the answer cannot reach outside RUN.
+                        let name = Path::new(&build.name).file_name().context("a release's zip has a name")?;
+                        let path = Path::new(skyward_sys::RUN).join(Path::new(name));
                         let task = updates::Task::UpdateSkyward { build, codename: cfg.device.codename.clone(), path };
                         skyward_updater = Some(updates::Worker::start(task, servers.clone())?);
                     }
