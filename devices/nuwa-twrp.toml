@@ -171,14 +171,23 @@ ready_property = "vendor.sys.listeners.registered"
 user = "root"
 groups = ["root", "drmrpc"]
 
+# The key store, and the service it offers to programs that speak the newer
+# key interface: on a phone whose own key service is of an older kind, or
+# whose keys were made by another build, this is the one that adapts them.
+# The phone's own programs and its TWRP both open the data partition
+# through it.
+[[service]]
+path = "/system/bin/keystore2"
+args = ["/tmp/misc/keystore"]
+libraries = ["/system/lib64"]
+ready_service = "android.security.compat.IKeystoreCompatService/default"
+user = "root"
+groups = ["root"]
+
 # The key service, the only thing that can use keys the phone wrapped in
 # hardware. Decryption of the data partition needs it.
-#
-# On this base it is the base's own, kept out of its ramdisk by the packer:
-# a key blob is read by the key service of the build that wrote it, and the
-# phone's vendor partition keeps an older one that cannot read these at all.
 [[service]]
-path = "/system/bin/base-keymint-service"
+path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
 libraries = ["/system/lib64", "/vendor/lib64"]
 ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
 user = "system"

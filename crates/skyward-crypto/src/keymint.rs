@@ -8,6 +8,19 @@ use skyward_binder::{service, status};
 /// hardware wrapped.
 pub const SERVICE: &str = "android.hardware.security.keymint.IKeyMintDevice/default";
 
+/// The key store's service for phones whose key service is of an older kind
+/// than the one the recovery speaks: it hands out a key service of the newer
+/// kind built on whichever the phone keeps, and does the adapting that a key
+/// made by another build needs. The phone's own programs go through it, and
+/// so does the recovery's TWRP.
+pub const COMPAT: &str = "android.security.compat";
+
+const COMPAT_INTERFACE: &str = "android.security.compat.IKeystoreCompatService";
+
+/// The one method of that service this program asks for: a key service of
+/// the newer kind.
+const GET_KEY_MINT_DEVICE: u32 = 1;
+
 const DEVICE: &str = "android.hardware.security.keymint.IKeyMintDevice";
 const OPERATION: &str = "android.hardware.security.keymint.IKeyMintOperation";
 
@@ -186,9 +199,34 @@ pub struct KeyMint<'a> {
     device: Handle<'a>,
 }
 
+/// The level of trust to ask the key store's compatibility service for: the
+/// phone's own secure world.
+const TRUSTED_ENVIRONMENT: i32 = 1;
+
+/// Ask the service that hands out a key service of the newer kind for one,
+/// and take a share of it so that it outlives the reply that named it.
+fn device_of<'a>(binder: &'a Binder, compat: Handle<'_>) -> Result<Handle<'a>> {
+    let mut call = Parcel::call(COMPAT_INTERFACE);
+    call.i32(TRUSTED_ENVIRONMENT);
+    let reply = compat.transact(GET_KEY_MINT_DEVICE, &call).context("ask the phone's key store for a key service")?;
+    let mut read = reply.read();
+    status::ok(&mut read).context("ask the phone's key store for a key service")?;
+    match read.object().context("read the key service it named")? {
+        Some(h) => Handle::hold(binder, h).context("hold the key service open"),
+        None => anyhow::bail!("the phone's key store named no key service"),
+    }
+}
+
 impl<'a> KeyMint<'a> {
     /// Reach the running key service, or say that none is.
     pub fn open(binder: &'a Binder) -> Result<KeyMint<'a>> {
+        // The key store's own compatibility service is preferred where it is
+        // running: it hands out a key service of the newer kind whichever
+        // the phone keeps, and a key made by a build other than the one
+        // running is one only it knows how to renew.
+        if let Some(compat) = service::find(binder, COMPAT)? {
+            return Ok(KeyMint { device: device_of(binder, compat)? });
+        }
         let device = service::find(binder, SERVICE)?
             .with_context(|| format!("{SERVICE} is not running; the phone's key service has to be started first"))?;
         Ok(KeyMint { device })
