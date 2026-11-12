@@ -291,6 +291,7 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-crypto/src/data.rs` | 解密不再依赖某一份 fstab：条目按 `metadata_encryption` 选（`fstab::encrypted`，原来固定取第一条，同一挂载点多条时会选中不带该参数的那条并报「未整盘加密」）；探测不出文件系统时回落到该条目而非第一条；`keydirectory` 缺省按 fs_mgr 的 `/metadata/vold/metadata_encryption`；`wrappedkey_v0` 与 `v1` 及以后都按硬件包装处理，其它后缀明确报错；表里没有任何整盘加密条目时直接挂载原分区，不再要求 dm 映射 |
 | `crates/skyward/src/wipe.rs` | 恢复出厂改为按 `metadata_encryption` 取条目判断 `rebuilt`（原来固定第一条，可能误判为不可重建而拒绝）；显式 reformat 时改用目标文件系统那条条目的参数去建文件系统 |
 | `crates/skyward-block/src/fsck.rs` | 挂载前的检查补上 ext4 的 `e2fsck -p`（原来只支持 f2fs，data 为 ext4 的系统会直接失败） |
+| `skyward-info` / `skyward-ui` / `skyward/src/ui.rs` | 开发构建（未设 `SKYWARD_VERSION`，版本显示 0.2.0）不再向 GitHub 查新版本，更新页写明「试验构建，不查找新版本」；此前会认为 `1.5` 比 `0.2.0` 新并可一键**降级**回 v1.5 |
 
 新增单元测试 12 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 3、`wipe.rs` 1、`fsck.rs` 1）。**验证进度**：推分支 ✅ → `build.yml` lint + test 绿 ✅ → 合并 `fork/main` ✅ → 第二轮改动待 CI → 打包刷机（待做）→ 真机进文件页确认解密后自动重列（待做）。
 

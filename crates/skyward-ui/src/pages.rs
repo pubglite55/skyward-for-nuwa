@@ -2605,6 +2605,11 @@ pub fn update(cx: &Ctx) -> Frame {
 const WLAN_FIRST: Text = ["需先连接 WLAN", "需先連接 Wi-Fi", "Connect to Wi-Fi first"];
 const CHECKING: Text = ["正在检查更新", "正在檢查更新", "Checking for updates"];
 const CHECK_FOR_UPDATES: Text = ["检查更新", "檢查更新", "Check for updates"];
+const NO_RELEASE_TO_LOOK_FOR: Text = [
+    "试验构建，不查找新版本",
+    "試驗構建，不查找新版本",
+    "A build made to try something looks for no newer one",
+];
 const DOWNLOADING: Text = ["正在下载", "正在下載", "Downloading"];
 const CHECKING_PART: Text = ["正在校验已下载的部分", "正在驗證已下載的部分", "Verifying what was downloaded"];
 
@@ -2760,6 +2765,7 @@ fn skyward_online(c: &mut Canvas, cx: &Ctx, y: f32, out: &mut Vec<Hit>) -> f32 {
     let gap = t.m.card_gap;
     let newest = match &s.skyward_check {
         SkywardCheck::Asking => return widgets::list(c, t, f, y, &[Row::new(l.pick(CHECKING)).trail(Trail::None)]).bottom,
+        SkywardCheck::Development => return widgets::footnote(c, t, f, y, l.pick(NO_RELEASE_TO_LOOK_FOR)),
         SkywardCheck::Answered(n) => n,
         other => {
             let mut row = Row::new(l.pick(CHECK_FOR_UPDATES));

@@ -2529,9 +2529,16 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     Effect::StopDownload => downloader.as_ref().context("there is no download to stop")?.stop(),
                     Effect::CheckSkyward => {
                         ensure!(skyward_checker.is_none(), "GitHub is being asked already");
-                        let probe = cfg.wlan.as_ref().context("the phone's WLAN is not brought up")?.probe.clone();
-                        let task = updates::Task::CheckSkyward { probe, codename: cfg.device.codename.clone() };
-                        skyward_checker = Some(updates::Worker::start(task, servers.clone())?);
+                        // A build made to try something carries the crates'
+                        // own version, against which the newest release reads
+                        // as newer: the page would offer to go back to it.
+                        if skyward_info::RELEASED {
+                            let probe = cfg.wlan.as_ref().context("the phone's WLAN is not brought up")?.probe.clone();
+                            let task = updates::Task::CheckSkyward { probe, codename: cfg.device.codename.clone() };
+                            skyward_checker = Some(updates::Worker::start(task, servers.clone())?);
+                        } else {
+                            app.skyward_is_not_a_release();
+                        }
                     }
                     // The zip goes into the recovery's own folder, which is
                     // in memory, before its image goes into the recovery

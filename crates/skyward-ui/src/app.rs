@@ -186,6 +186,10 @@ pub enum SkywardCheck {
     #[default]
     Idle,
     Asking,
+    /// The build names no release of its own, so there is no newer one of it
+    /// to look for: a build made to try something carries the crates' own
+    /// version, against which the newest release reads as newer.
+    Development,
     Failed(Unanswered),
     Answered(Newest),
 }
@@ -3673,6 +3677,15 @@ impl App {
             Ok(newest) => SkywardCheck::Answered(newest),
             Err(why) => SkywardCheck::Failed(why),
         };
+        if matches!(self.screen(), Screen::Settings | Screen::SkywardUpdate) {
+            self.refresh();
+        }
+    }
+
+    /// Say that this build names no release of its own, so there is no newer
+    /// one of it to look for.
+    pub fn skyward_is_not_a_release(&mut self) {
+        self.state.skyward_check = SkywardCheck::Development;
         if matches!(self.screen(), Screen::Settings | Screen::SkywardUpdate) {
             self.refresh();
         }
