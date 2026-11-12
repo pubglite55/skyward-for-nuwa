@@ -278,7 +278,7 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | P3 | 解密后文件页自动重列目录 | **代码层已修，待真机验证**（见下表）；原现象：MTP 已自动跟随 `storage_open`，文件页需要手动退出重进 |
 | — | 旧版本（≤v1.4）自更新会提示一次 v1.5 | 因旧构建报告 0.2.0，更新后即正常 |
 
-**本轮改动（CI 已过，实机未验）**：本机无 Rust 工具链，且这台手机当时 adb 协议层未建立（Windows 能看到设备、`adb devices` 为空）。这些改动已提交 `d297db9`，推到 `fork` 的分支 `fix/recovery-robustness`；2026-11-12 的 `build.yml` 全绿（host clippy + `cargo test` + NDK clippy + 打包），产物 `skyward-d297db9-nuwa-OS3.0.312.0.WMBCNXM.zip`（artifact `13937435546`，保留 7 天）。**未刷机、未实机验证**，真机确认前不要打 tag。
+**本轮改动（CI 已过，实机未验）**：本机无 Rust 工具链，且这台手机当时 adb 协议层未建立（Windows 能看到设备、`adb devices` 为空）。这些改动已提交（`d297db9` 为代码与测试，其后为文档）并合并到 `fork/main`，分支 `fix/recovery-robustness` 保留；2026-11-12 的 `build.yml` 全绿（host clippy + `cargo test` + NDK clippy + 打包），每次推送都会产出 `skyward-<提交>-nuwa-OS3.0.312.0.WMBCNXM.zip`（artifact 保留 7 天）。**未刷机、未实机验证**，真机确认前不要打 tag。
 
 | 文件 | 修了什么 |
 | --- | --- |
@@ -290,7 +290,7 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-block/src/fstab.rs` | 解析改为只取前 5 列、容忍多余列（只有 4 列也接受）；此前多一列就整行丢弃，带 `metadata_encryption` 的 `/data` 行会凭空消失 |
 | `crates/skyward-crypto/src/data.rs` | 取 `/data` 条目改为优先选带 `metadata_encryption` 的那条（原来固定取第一条；同一挂载点多条目时可能选中不带该参数的那条，报「未整盘加密」）；一条都没有时仍回落第一条，错误信息不变 |
 
-新增单元测试 9 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 2）。**验证进度**：推分支 ✅ → `build.yml` lint + test 绿 ✅ → 打包刷机（待做）→ 真机进文件页确认解密后自动重列（待做）。
+新增单元测试 9 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 2）。**验证进度**：推分支 ✅ → `build.yml` lint + test 绿 ✅ → 合并 `fork/main` ✅ → 打包刷机（待做）→ 真机进文件页确认解密后自动重列（待做）。
 
 ---
 
