@@ -31,7 +31,7 @@ jobs:
       - name: Pack it
         run: |
           tools/skyward-pack recovery --custom-base --stock stock/recovery.img --binary tools/skyward \
-            --system-init tools/system-init --config devices/nuwa.toml \
+            --system-init tools/system-init --config devices/nuwa-twrp.toml \
             --font resources/fonts/MiSansVF.ttf --mono resources/fonts/KirkMono-Regular.ttf \
             --mono-license resources/fonts/KirkMono-OFL.txt --out out/skyward-nuwa-twrpbase.img
       - uses: actions/upload-artifact@v4

@@ -122,6 +122,17 @@ fn main() -> Result<()> {
                     anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
                 }
             }
+            // A base of the system's own build carries a key service of its
+            // own, newer than the one the phone's vendor partition keeps and
+            // the only one that reads the key blobs its data was made with.
+            // It goes where the recovery's own programs are, so that the
+            // configuration can start it in place of the vendor's.
+            if custom_base {
+                let kept = keep_base_key_service(&mut rd);
+                if kept > 0 {
+                    println!("{kept} files of the base's own key service kept");
+                }
+            }
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
             skyward_config::DeviceConfig::load(&config)?;
             rd.replace(paths::RECOVERY, read(&binary)?)?;
@@ -179,6 +190,36 @@ fn main() -> Result<()> {
 
 /// The partition a recovery is made on, as a full update package names it.
 const RECOVERY: &str = "recovery";
+
+/// The key service a base carries, and the libraries it runs with, put among
+/// the recovery's own files. A base of the system's own build carries a key
+/// service newer than the one the phone's vendor partition keeps, and the
+/// key blobs a phone's data was made with are read by the newer one.
+fn keep_base_key_service(rd: &mut Ramdisk) -> usize {
+    const SERVICE: &str = "vendor/bin/hw/android.hardware.security.keymint-service-qti";
+    const KEPT: &str = "system/bin/base-keymint-service";
+    const LIBS: [&str; 6] = [
+        "libqtikeymint.so",
+        "libqtikeymaster4.so",
+        "libkeymasterutils.so",
+        "libkeymasterdeviceutils.so",
+        "libkeymasterprovision.so",
+        "libQSEEComAPI.so",
+    ];
+    let Some((mode, data)) = rd.find(SERVICE).map(|e| (e.mode & 0o777, e.data.clone())) else {
+        return 0;
+    };
+    let mut kept = usize::from(rd.add(KEPT, mode, data).is_ok());
+    for lib in LIBS {
+        let Some((mode, data)) = rd.find(&format!("vendor/lib64/{lib}")).map(|e| (e.mode & 0o777, e.data.clone())) else {
+            continue;
+        };
+        if rd.add(&format!("system/lib64/{lib}"), mode, data).is_ok() {
+            kept += 1;
+        }
+    }
+    kept
+}
 
 /// Take the recovery partition out of the stock build's full update package
 /// on its server, reading only what that partition takes of it, and write it
