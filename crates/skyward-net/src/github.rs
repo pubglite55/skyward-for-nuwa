@@ -270,7 +270,8 @@ mod tests {
         assert!(!newest(ANSWERED_013, "ishtar", "0.1.3").unwrap().newer, "the same version");
         assert!(!newest(ANSWERED_013, "ishtar", "0.2.0").unwrap().newer, "a build ahead of every release");
         assert!(newest(ANSWERED_013, "ishtar", "0.1.3-rc.1").unwrap().newer, "a build before the release it led to");
-        assert!(newest(ANSWERED_013, "ishtar", "0.1").is_err(), "a version this build cannot have");
+        assert!(newest(ANSWERED_013, "ishtar", "0.1").unwrap().newer, "a two-part version is read as 0.1.0, as this fork's tags name them");
+        assert!(newest(ANSWERED_013, "ishtar", "nightly").is_err(), "a version this build cannot have");
     }
 
     #[test]
