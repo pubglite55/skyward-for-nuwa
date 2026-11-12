@@ -675,7 +675,15 @@ fn adopt_installed_version(props: &std::collections::HashMap<String, String>, cf
         let installed = props.get(name).with_context(|| format!("the installed system says no {name}"))?;
         let named = match name {
             "ro.build.version.release" => cfg.device.build_release.as_ref(),
-            "ro.build.version.security_patch" => cfg.device.build_patch.as_ref(),
+            // The vendor build is the one the key service measures a key's
+            // own build against: a key made by a newer vendor build than the
+            // one the recovery reports is one the service will not use until
+            // it is renewed, and a renewal of it is refused. Where the
+            // configuration names a build, the vendor's patch level is that
+            // build's, not the installed vendor partition's — which on a
+            // phone whose data was made by a newer system is older than the
+            // key itself.
+            "ro.build.version.security_patch" | "ro.vendor.build.security_patch" => cfg.device.build_patch.as_ref(),
             _ => None,
         };
         let value = named.unwrap_or(installed);
