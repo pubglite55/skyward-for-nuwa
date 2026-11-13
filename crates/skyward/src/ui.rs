@@ -1,5 +1,4 @@
 use crate::backup;
-use crate::browser::{self, Read};
 use crate::credential;
 use crate::decrypt::{self, Decryptor};
 use crate::filework;
@@ -1013,8 +1012,8 @@ fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
     w.as_ref().context("the phone's WLAN is not brought up")
 }
 
-/// Start taking `url` into `dir` under `name`: the download page and a link
-/// followed in the browser are taken the same way, and told the same way.
+/// Start taking `url` into `dir` under `name`: the download page takes a
+/// file this way, and is told how it goes.
 fn start_download(
     app: &mut App,
     fetcher: &mut Option<updates::Worker>,
@@ -1300,8 +1299,6 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // tried: a phone whose WLAN is not up yet is tried again while it shows.
     let mut portal: Option<portal::Portal> = None;
     let mut portal_tried: Option<Instant> = None;
-    // The page the browser asked for, being read on a thread of its own.
-    let mut page_reader: Option<browser::Fetcher> = None;
     if app.state.file_transfer {
         match Transfer::start(cfg, &info, app.state.time_zone) {
             Ok(t) => transfer = Some(t),
@@ -2135,29 +2132,6 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                 app.wireless_at(wireless_url(cfg, server.port()));
             }
             app.wireless_served(server.served());
-        }
-        // What the browser asked for, if it has come since the last look: a
-        // page to show, or a file to take into the folder it saves to.
-        let read = page_reader.as_ref().and_then(|f| f.taken());
-        if let Some(read) = read {
-            page_reader = None;
-            match read {
-                Ok(Read::Page { page, pictures }) => {
-                    app.browsed(Ok(page));
-                    for (at, png) in pictures {
-                        app.pictured(at, &png);
-                    }
-                }
-                Ok(Read::File { url, name }) => {
-                    let dir = PathBuf::from(&app.state.browse_folder);
-                    if let Err(e) = start_download(&mut app, &mut fetcher, servers.clone(), url, name, dir) {
-                        skyward_sys::kmsg(&format!("the file the browser found could not be taken: {e:#}"))?;
-                        let why = skyward_ui::fmt::download_failure(app.state.lang, &Failure::Other(format!("{e:#}")));
-                        app.browse_note(why, now);
-                    }
-                }
-                Err(why) => app.browsed(Err(why)),
-            }
         }
         // A link too long for the recovery's keyboard can be typed on
         // another device, which opens a page the phone serves: it runs while
@@ -3067,11 +3041,6 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         if let Some(worker) = &fetcher {
                             worker.stop();
                         }
-                    }
-                    // A page the browser asked for: read on its own thread,
-                    // and the page told when it has come.
-                    Effect::Browse(url) => {
-                        page_reader = Some(browser::Fetcher::start(url, servers.clone())?);
                     }
                     // A link a computer put in a file, taken from there: the
                     // first line that is not blank.

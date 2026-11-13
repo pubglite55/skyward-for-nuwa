@@ -14,7 +14,6 @@ pub mod icons;
 pub mod lang;
 pub mod motion;
 pub mod pages;
-pub mod picture;
 pub mod search;
 pub mod settings;
 pub mod sprite;

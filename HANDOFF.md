@@ -299,10 +299,10 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-ui`（`app`/`settings`/`pages`/`search`） | 文件管理器排序：高级 → 文件排序，可按名称 / 大小 / 修改时间，升降序，文件夹置顶；排序在界面侧完成，改选即重排已打开的列表，选择写入设置文件（`sort`），下次启动保留 |
 | `crates/skyward-net/src/download.rs`、`crates/skyward/src/updates.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「网络下载」：高级 → 网络下载，输入 `http://` / `https://` 直链，按回车即下到内部存储 `Download/`；支持 `Range` 续传、可停止（已下部分保留，再下同一地址接着下）、同名文件自动加序号不覆盖。为此给下载层加了「无摘要」模式（`Sum::None`，手输地址不带校验值）与文件名推导（`name_from` / `free_name`） |
 
-### 2026-11-13 晚 · 撤掉锁屏层，加入内置浏览器
+### 2026-11-13 晚 · 撤掉锁屏层（内置浏览器后来也整体删除）
 
 - **按用户要求移除**：下拉控制中心、锁屏（日期/大字时间/电量/滑动解锁）、双击亮屏。做法是 `git revert` 回退引入它们的提交（`a937b4a`、`9c21ac6`、`2a18e51`、`37a6213`、`dd1791b`、`7fa9075`），不是逐行删；`sleep()` 回到单参数，`compose()` 不再画锁屏。保留：记住锁屏密码（`remember`）、锁屏页（解密页的密码输入）、截图快捷键。
-- **新增内置浏览器**（高级 → 浏览器）：`skyward-net/src/html.rs` 解析 HTML（标题/段落/标题行/链接/图片、实体、相对地址补全），`skyward/src/browser.rs` 在独立线程用 ureq 取页面（512 KB 上限，带手机 UA）并顺带取最多 3 张 PNG/JPEG 图（各 ≤1 MB），`pages::browser` 画成图形界面：顶部地址栏（返回箭头 / 地球 / 地址 / 刷新弧），首页是自绘的「Bing」标题页（搜索框 + 必应/GitHub/小米三块），输入词即走 `https://cn.bing.com/search?q=`，输入域名自动补 `https://`；图片用 `skyward-ui/src/picture.rs` 解 PNG（png crate）与 JPEG（jpeg-decoder，关掉 rayon）。恢复里没有安卓运行时，APK（如 Via）与 Chromium 都不能运行；页面不执行脚本、不显示 SVG/WebP 图。
+- ~~新增内置浏览器~~ **已按用户要求整体删除**（2026-11-13 深夜）：`skyward-net/src/html.rs`、`skyward/src/browser.rs`、`skyward-ui/src/picture.rs` 与 `jpeg-decoder` 依赖、高级页入口、`Screen::Browser`/`Screen::PickFolder`、`browse_folder` 设置项一并移除；下载页的二维码与 `link.txt` 仍保留（HTTP 服务端在 `skyward-net/src/portal.rs`，与本项无关）。删除原因：recovery 里没有安卓运行时，无法运行 Chromium/Via；自绘的简易浏览器排版达不到「正常浏览器」，用户决定不要了。
 - 上面的截图对齐表里，控制中心与锁屏两行已随回退作废，其余（解密页圆环、WLAN 记忆、备份跳过、下载页二维码）仍保留。
 
 ### 2026-11-13 · 对齐 pudding 截图（控制中心、锁屏、解密页、下载页）

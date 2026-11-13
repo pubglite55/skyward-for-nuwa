@@ -12,7 +12,6 @@ use crate::glow::{self, GlowClock};
 use crate::lang::{Lang, Text};
 use crate::motion::{self, Spring};
 use crate::pages::{self, Band, Ctx};
-use crate::picture::Picture;
 use crate::sprite::{Blurs, Sprite};
 use crate::search;
 use crate::settings::Settings;
@@ -24,7 +23,6 @@ use skyward_info::DeviceInfo;
 use skyward_install::{Event, ImageKind, Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::{Failure, Progress};
 use skyward_net::github::{Build, Newest};
-use skyward_net::html::{Block, Page};
 use skyward_net::release::{Release, Unanswered};
 use skyward_net::supplicant::Security;
 use skyward_net::wlan::{Joined, Network, Power, Stage as Joining, Traffic, Wlan};
@@ -147,11 +145,6 @@ pub enum Screen {
     /// The order the file manager lists entries in: by what, which way,
     /// and whether folders stand first.
     Sort,
-    /// The recovery's own browser: an address, and what the page at it says
-    /// in its markup, its links a finger can follow.
-    Browser,
-    /// Choosing the folder a file taken from the web is saved in.
-    PickFolder,
 }
 
 /// How far asking the update server for the newest system has come.
@@ -954,111 +947,6 @@ pub enum Fetch {
     Failed(String),
 }
 
-/// Where the browser's files are saved until the pages are told otherwise.
-pub const BROWSER_FOLDER: &str = "/sdcard/Download";
-
-/// The page the browser comes to with nothing asked of it: the search page
-/// the phone's own browser opens on.
-pub const BROWSE_HOME: &str = "https://cn.bing.com/";
-
-/// The pages the browser offers, side by side, when it has nothing shown
-/// yet: the words of each, and the address it opens.
-pub const QUICK: [(&str, &str); 3] = [
-    ("必应", "https://cn.bing.com/"),
-    ("GitHub", "https://github.com/"),
-    ("小米", "https://www.mi.com/"),
-];
-
-/// The address what was typed names: an address as it stands, a host given
-/// https before it, and anything else — words to look up — sent to the search
-/// page. Nothing at all where nothing was typed.
-fn addressed(typed: &str) -> Option<String> {
-    let typed = typed.trim();
-    if typed.is_empty() {
-        return None;
-    }
-    let lower = typed.to_ascii_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") {
-        return Some(typed.to_string());
-    }
-    if typed.is_ascii() && !typed.contains(char::is_whitespace) && looks_like_host(typed) {
-        return Some(format!("https://{typed}"));
-    }
-    Some(format!("https://cn.bing.com/search?q={}", quoted(typed)))
-}
-
-/// Whether `text` names a host, as `example.com` or `example.com/a` does:
-/// a dot in it, and letters after the last dot.
-fn looks_like_host(text: &str) -> bool {
-    let host = text.split(['/', '?', '#']).next().unwrap_or(text);
-    let Some((_, last)) = host.rsplit_once('.') else { return false };
-    last.len() >= 2 && last.chars().all(|c| c.is_ascii_alphabetic())
-}
-
-/// `text` as an address's query holds it: letters, digits and `-._~` as they
-/// are, a space as a plus, and every other byte of its UTF-8 as `%XX`.
-fn quoted(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(byte as char),
-            b' ' => out.push('+'),
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
-}
-
-/// The recovery's own browser: the address it is at, the page it made of it,
-/// and the pages gone through to get here.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Browse {
-    /// What the address field holds, ready to be edited.
-    pub url: String,
-    /// The address the page shown came from.
-    pub at: String,
-    /// The page shown, where one has come.
-    pub page: Option<Page>,
-    pub status: BrowseStatus,
-    /// The addresses gone through before this one, the last last.
-    pub history: Vec<String>,
-    /// The address field is being typed in: the keys are up.
-    pub typing: bool,
-    /// The pictures of the page shown, by the address each is at, as far as
-    /// this recovery can show them.
-    pub images: std::collections::BTreeMap<String, Picture>,
-}
-
-impl Default for Browse {
-    /// A browser with nothing shown yet, its field holding the page it opens
-    /// on.
-    fn default() -> Self {
-        Browse {
-            url: BROWSE_HOME.to_string(),
-            at: String::new(),
-            page: None,
-            status: BrowseStatus::Idle,
-            history: Vec::new(),
-            typing: false,
-            images: std::collections::BTreeMap::new(),
-        }
-    }
-}
-
-/// How reading the page at an address stands.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum BrowseStatus {
-    /// Nothing asked for yet.
-    #[default]
-    Idle,
-    /// Asked for, and not come yet.
-    Loading,
-    /// Shown.
-    Shown,
-    /// It could not be read: why.
-    Failed(String),
-}
-
 /// How taking a file from an address ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FetchEnd {
@@ -1399,26 +1287,6 @@ pub enum Action {
     /// Take the address out of /sdcard/Download/link.txt, where a computer
     /// put it, and fill the page's field with it.
     FetchFromFile,
-    /// Read the address the browser's field holds.
-    BrowseGo,
-    /// Open the browser's address field again, the keys up.
-    BrowseEdit,
-    /// Follow the link at this block of the page shown.
-    BrowseLink(usize),
-    /// Back to the page before this one.
-    BrowseBack,
-    /// Read this page again.
-    BrowseReload,
-    /// Open the browser's field with nothing in it, for words to look up.
-    BrowseSearch,
-    /// Open the page at this one of [`QUICK`].
-    Quick(usize),
-    /// Open the folder at this entry of the one the picker shows.
-    PickInto(usize),
-    /// Up to the folder the one shown is in.
-    PickUp,
-    /// Save the files taken from the web in the folder shown.
-    ChooseFolder,
     /// Put the file manager's entries in order by this.
     SortBy(SortKey),
     /// Turn that order round, or back.
@@ -1871,10 +1739,6 @@ pub struct State {
     /// The address the page another device types a link on is served at,
     /// while the download page shows and the phone has one.
     pub fetch_portal: Option<String>,
-    /// The recovery's own browser.
-    pub browser: Browse,
-    /// The folder a file taken from the web is saved in.
-    pub browse_folder: String,
     /// The order the file manager lists a folder's entries in: what they
     /// are put in order by, whether the order is turned round, and whether
     /// folders stand before files.
@@ -2065,8 +1929,6 @@ impl Default for State {
             wireless_served: 0,
             fetch_url: String::new(),
             fetch_portal: None,
-            browser: Browse::default(),
-            browse_folder: BROWSER_FOLDER.to_string(),
             fetch: Fetch::Idle,
             // The stock file manager's own order to start with: folders
             // first, then by name.
@@ -2285,8 +2147,6 @@ pub enum Effect {
     StopFetch,
     /// Read /sdcard/Download/link.txt, where a computer put the address.
     FetchFromFile,
-    /// Read `url` and tell the browser page with [`App::browsed`].
-    Browse(String),
     /// Start receiving a package over USB.
     Sideload,
     /// Start installing the file at this path from the top of a place,
@@ -5211,69 +5071,6 @@ impl App {
         self.say(&why, now);
     }
 
-    /// Something the browser has to say that is not about the page shown: a
-    /// file that could not be taken, and why.
-    pub fn browse_note(&mut self, why: String, now: u64) {
-        self.say(&why, now);
-    }
-
-    /// Read the page at `url`, the pages gone through so far kept to go
-    /// back to. Nothing is asked of the network here: the runtime reads it
-    /// and tells [`App::browsed`].
-    fn browse_to(&mut self, url: String, now: u64) -> Vec<Effect> {
-        let url = match addressed(&url) {
-            Some(url) => url,
-            None => {
-                self.say(self.state.lang.pick(["请输入网址或要搜索的词", "請輸入網址或要搜尋的詞", "Type an address, or what to look up"]), now);
-                return Vec::new();
-            }
-        };
-        let b = &mut self.state.browser;
-        // The page shown is the one gone back to, unless it is this one.
-        if !b.at.is_empty() && b.at != url {
-            b.history.push(b.at.clone());
-            if b.history.len() > 32 {
-                b.history.remove(0);
-            }
-        }
-        b.url = url.clone();
-        b.at = url.clone();
-        b.status = BrowseStatus::Loading;
-        b.page = None;
-        b.typing = false;
-        self.refresh();
-        vec![Effect::Browse(url)]
-    }
-
-    /// The page at the address asked for has come, or it has not: how it
-    /// went is what the browser shows.
-    pub fn browsed(&mut self, page: Result<Page, String>) {
-        let b = &mut self.state.browser;
-        b.images.clear();
-        match page {
-            Ok(page) => {
-                b.page = Some(page);
-                b.status = BrowseStatus::Shown;
-            }
-            Err(why) => {
-                b.page = None;
-                b.status = BrowseStatus::Failed(why);
-            }
-        }
-        self.refresh();
-    }
-
-    /// A picture of the page shown has come: it is kept to be drawn, if it
-    /// is one this recovery can read, and the page is drawn again.
-    pub fn pictured(&mut self, at: String, png: &[u8]) {
-        if let Some(picture) = crate::picture::read(png) {
-            self.state.browser.images.insert(at, picture);
-            if self.screen() == Screen::Browser {
-                self.refresh();
-            }
-        }
-    }
-
     fn say(&mut self, text: &str, now: u64) {
         self.toast = Some((text.to_string(), now + TOAST_MS));
         self.dirty = true;
@@ -5651,9 +5448,6 @@ impl App {
                 }
             }
             Screen::Decrypt if matches!(self.state.data, Data::Closed | Data::Failed(_)) => self.open_data(),
-            // The picker shows the folder files are saved in, and the browser
-            // opens on the page it comes to with nothing asked of it.
-            Screen::PickFolder => vec![Effect::ReadDir(self.state.browse_folder.clone())],
             // The files are what the page is about: the partition they are
             // in is opened as the page opens, so that turning the switch
             // needs nothing else.
@@ -5715,78 +5509,6 @@ impl App {
             Action::OpenData => return self.open_data(),
             Action::StopFetch => return vec![Effect::StopFetch],
             Action::FetchFromFile => return vec![Effect::FetchFromFile],
-            // The browser: its field is opened for typing, and what is
-            // typed in it, or a link, is read.
-            Action::BrowseEdit => {
-                self.state.browser.typing = true;
-                self.refresh();
-            }
-            Action::BrowseGo => {
-                let url = self.state.browser.url.clone();
-                return self.browse_to(url, now);
-            }
-            Action::BrowseLink(at) => {
-                let to = self.state.browser.page.as_ref().and_then(|p| p.blocks.get(at)).and_then(|b| match b {
-                    Block::Link { to, .. } => Some(to.clone()),
-                    _ => None,
-                });
-                if let Some(to) = to {
-                    return self.browse_to(to, now);
-                }
-            }
-            Action::BrowseBack => {
-                if let Some(back) = self.state.browser.history.pop() {
-                    return self.browse_to(back, now);
-                }
-            }
-            Action::BrowseReload => {
-                let url = self.state.browser.at.clone();
-                if !url.is_empty() {
-                    return self.browse_to(url, now);
-                }
-            }
-            Action::BrowseSearch => {
-                self.state.browser.url.clear();
-                self.state.browser.typing = true;
-                self.refresh();
-            }
-            Action::Quick(k) => {
-                if let Some((_, url)) = QUICK.get(k).copied() {
-                    return self.browse_to(url.to_string(), now);
-                }
-            }
-            // The folder a file taken from the web is saved in: the picker
-            // walks the folders of internal storage, and takes the one it
-            // shows.
-            Action::PickInto(i) => {
-                let (name, folder) = {
-                    let entry = self.state.files.entry(i);
-                    (entry.name.clone(), matches!(entry.kind, FileKind::Folder { .. } | FileKind::Link { folder: true, .. }))
-                };
-                if folder {
-                    let path = self.state.files.inside(&name);
-                    self.state.files.path = path.clone();
-                    self.refresh();
-                    return vec![Effect::ReadDir(path)];
-                }
-            }
-            Action::PickUp => {
-                let here = self.state.files.path.clone();
-                let up = match std::path::Path::new(&here).parent() {
-                    Some(parent) if !parent.as_os_str().is_empty() => parent.to_string_lossy().into_owned(),
-                    _ => here,
-                };
-                if up != self.state.files.path {
-                    self.state.files.path = up.clone();
-                    self.refresh();
-                    return vec![Effect::ReadDir(up)];
-                }
-            }
-            Action::ChooseFolder => {
-                self.state.browse_folder = self.state.files.path.clone();
-                self.refresh();
-                return self.back(now);
-            }
             Action::Skip => {
                 self.leave(true);
                 if self.stack.len() > 1 {
@@ -6363,7 +6085,6 @@ impl App {
             Screen::Decrypt => &mut self.state.code,
             Screen::Rename => &mut self.state.new_name,
             Screen::Fetch => &mut self.state.fetch_url,
-            Screen::Browser => &mut self.state.browser.url,
             Screen::WlanPassword => &mut self.state.password,
             Screen::WlanAdd => {
                 let a = self.state.adding.as_mut().expect("the page adds a network");
@@ -6593,12 +6314,6 @@ impl App {
                         self.refresh();
                         return vec![Effect::StartFetch { url, name }];
                     }
-                }
-                // The address typed on the browser's field is read: the
-                // keyboard gives way to the page.
-                Screen::Browser => {
-                    let url = self.state.browser.url.clone();
-                    return self.browse_to(url, now);
                 }
                 // A password the network's protection cannot take is turned
                 // down here; one it can goes, and the WLAN page shows how
@@ -8848,50 +8563,6 @@ mod tests {
         app.fetch_started("b.zip");
         app.fetch_ended(FetchEnd::Failed("下载失败：the server answered 404".into()));
         assert!(matches!(app.state.fetch, Fetch::Failed(_)));
-    }
-
-    #[test]
-    fn the_browser_reads_the_address_it_is_given_and_goes_back_over_it() {
-        use skyward_net::html::Block;
-        let mut app = App::new(Screen::Browser, W, H, PPD);
-        app.state.browser.url = "https://example.com/a".into();
-        assert_eq!(app.act(Action::BrowseGo, 0), vec![Effect::Browse("https://example.com/a".into())]);
-        assert_eq!(app.state.browser.status, BrowseStatus::Loading);
-        assert!(!app.state.browser.typing, "the keys give way to the page");
-        app.browsed(Ok(Page {
-            title: "示例".into(),
-            blocks: vec![
-                Block::Words("你好".into()),
-                Block::Link { words: "下一页".into(), to: "https://example.com/b".into() },
-            ],
-        }));
-        assert_eq!(app.state.browser.status, BrowseStatus::Shown);
-        assert_eq!(app.state.browser.page.as_ref().map(|p| p.title.as_str()), Some("示例"));
-        // A link leads to the page it names, and back comes to this one.
-        assert_eq!(app.act(Action::BrowseLink(1), 10), vec![Effect::Browse("https://example.com/b".into())]);
-        assert_eq!(app.state.browser.history, vec!["https://example.com/a".to_string()]);
-        assert_eq!(app.act(Action::BrowseBack, 20), vec![Effect::Browse("https://example.com/a".into())]);
-        assert_eq!(app.state.browser.history, vec!["https://example.com/b".to_string()], "the page gone back from is the one to go forward to");
-        // A page that could not be read says why, and none is shown.
-        app.browsed(Err("服务器回了 404".into()));
-        assert_eq!(app.state.browser.status, BrowseStatus::Failed("服务器回了 404".into()));
-        assert!(app.state.browser.page.is_none());
-    }
-
-    #[test]
-    fn a_host_is_given_https_and_words_are_looked_up() {
-        let mut app = App::new(Screen::Browser, W, H, PPD);
-        app.state.browser.url = "example.com/a".into();
-        assert_eq!(app.act(Action::BrowseGo, 0), vec![Effect::Browse("https://example.com/a".into())]);
-        app.state.browser.url = "小米 13".into();
-        assert_eq!(
-            app.act(Action::BrowseGo, 10),
-            vec![Effect::Browse("https://cn.bing.com/search?q=%E5%B0%8F%E7%B1%B3+13".into())],
-            "words are looked up, each byte of them quoted"
-        );
-        app.state.browser.url = "   ".into();
-        assert!(app.act(Action::BrowseGo, 20).is_empty(), "nothing is read");
-        assert!(app.toast.is_some(), "and the page says why");
     }
 
     #[test]
