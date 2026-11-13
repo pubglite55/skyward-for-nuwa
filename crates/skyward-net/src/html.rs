@@ -102,7 +102,7 @@ impl Built<'_> {
                     let end = markup[i..].to_ascii_lowercase().find("</title").map(|at| i + at);
                     let words = end.map_or(&markup[i..], |at| &markup[i..at]);
                     self.title = collapse(&decode(words));
-                    i = end.map_or(bytes.len(), |at| at);
+                    i = end.unwrap_or(bytes.len());
                 }
                 "a" if !closing => {
                     self.flush();

@@ -3326,7 +3326,7 @@ struct Placed {
 enum Kind {
     Heading,
     Words,
-    Link(String),
+    Link(usize),
     Note,
 }
 
@@ -3391,11 +3391,11 @@ pub fn browser(cx: &Ctx) -> Frame {
             placed.push(Placed { lines, top: y, pitch: m.dp(28.0), px: m.dp(22.0), kind: Kind::Heading });
             y += h;
         }
-        for block in &page.blocks {
+        for (at, block) in page.blocks.iter().enumerate() {
             let (words, kind) = match block {
                 Block::Heading(words) => (words, Kind::Heading),
                 Block::Words(words) => (words, Kind::Words),
-                Block::Link { words, to } => (words, Kind::Link(to.clone())),
+                Block::Link { words, .. } => (words, Kind::Link(at)),
             };
             let (px, pitch, gap, face) = match kind {
                 Kind::Heading => (m.dp(20.0), m.dp(26.0), m.dp(12.0), heading),
@@ -3433,11 +3433,11 @@ pub fn browser(cx: &Ctx) -> Frame {
         for (i, line) in p.lines.iter().enumerate() {
             c.text_top(face, line, x, p.top + i as f32 * p.pitch, p.px, ink, None);
         }
-        if let Kind::Link(to) = &p.kind {
+        if let Kind::Link(at) = &p.kind {
             let h = p.lines.len() as f32 * p.pitch;
             out.push(Hit {
                 rect: Rect::new(x - m.dp(2.0), p.top - m.dp(2.0), max_w + m.dp(4.0), h + m.dp(4.0)),
-                action: Action::BrowseLink(to.clone()),
+                action: Action::BrowseLink(*at),
             });
         }
     }

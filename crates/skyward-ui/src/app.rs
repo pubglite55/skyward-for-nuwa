@@ -23,7 +23,7 @@ use skyward_info::DeviceInfo;
 use skyward_install::{Event, ImageKind, Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::{Failure, Progress};
 use skyward_net::github::{Build, Newest};
-use skyward_net::html::Page;
+use skyward_net::html::{Block, Page};
 use skyward_net::release::{Release, Unanswered};
 use skyward_net::supplicant::Security;
 use skyward_net::wlan::{Joined, Network, Power, Stage as Joining, Traffic, Wlan};
@@ -1326,8 +1326,8 @@ pub enum Action {
     BrowseGo,
     /// Open the browser's address field again, the keys up.
     BrowseEdit,
-    /// Follow a link to this address.
-    BrowseLink(String),
+    /// Follow the link at this block of the page shown.
+    BrowseLink(usize),
     /// Back to the page before this one.
     BrowseBack,
     /// Read this page again.
@@ -5619,7 +5619,15 @@ impl App {
                 let url = self.state.browser.url.clone();
                 return self.browse_to(url, now);
             }
-            Action::BrowseLink(to) => return self.browse_to(to, now),
+            Action::BrowseLink(at) => {
+                let to = self.state.browser.page.as_ref().and_then(|p| p.blocks.get(at)).and_then(|b| match b {
+                    Block::Link { to, .. } => Some(to.clone()),
+                    _ => None,
+                });
+                if let Some(to) = to {
+                    return self.browse_to(to, now);
+                }
+            }
             Action::BrowseBack => {
                 if let Some(back) = self.state.browser.history.pop() {
                     return self.browse_to(back, now);
@@ -8702,11 +8710,17 @@ mod tests {
         assert_eq!(app.act(Action::BrowseGo, 0), vec![Effect::Browse("https://example.com/a".into())]);
         assert_eq!(app.state.browser.status, BrowseStatus::Loading);
         assert!(!app.state.browser.typing, "the keys give way to the page");
-        app.browsed(Ok(Page { title: "示例".into(), blocks: vec![Block::Words("你好".into())] }));
+        app.browsed(Ok(Page {
+            title: "示例".into(),
+            blocks: vec![
+                Block::Words("你好".into()),
+                Block::Link { words: "下一页".into(), to: "https://example.com/b".into() },
+            ],
+        }));
         assert_eq!(app.state.browser.status, BrowseStatus::Shown);
         assert_eq!(app.state.browser.page.as_ref().map(|p| p.title.as_str()), Some("示例"));
         // A link leads to the page it names, and back comes to this one.
-        assert_eq!(app.act(Action::BrowseLink("https://example.com/b".into()), 10), vec![Effect::Browse("https://example.com/b".into())]);
+        assert_eq!(app.act(Action::BrowseLink(1), 10), vec![Effect::Browse("https://example.com/b".into())]);
         assert_eq!(app.state.browser.history, vec!["https://example.com/a".to_string()]);
         assert_eq!(app.act(Action::BrowseBack, 20), vec![Effect::Browse("https://example.com/a".into())]);
         assert_eq!(app.state.browser.history, vec!["https://example.com/b".to_string()], "the page gone back from is the one to go forward to");
