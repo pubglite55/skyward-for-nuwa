@@ -1317,6 +1317,9 @@ pub enum Action {
     OpenData,
     /// Stop taking the file the download page is taking.
     StopFetch,
+    /// Take the address out of /sdcard/Download/link.txt, where a computer
+    /// put it, and fill the page's field with it.
+    FetchFromFile,
     /// Put the file manager's entries in order by this.
     SortBy(SortKey),
     /// Turn that order round, or back.
@@ -1766,6 +1769,9 @@ pub struct State {
     /// it.
     pub fetch_url: String,
     pub fetch: Fetch,
+    /// The address the page another device types a link on is served at,
+    /// while the download page shows and the phone has one.
+    pub fetch_portal: Option<String>,
     /// The order the file manager lists a folder's entries in: what they
     /// are put in order by, whether the order is turned round, and whether
     /// folders stand before files.
@@ -1955,6 +1961,7 @@ impl Default for State {
             wireless_url: None,
             wireless_served: 0,
             fetch_url: String::new(),
+            fetch_portal: None,
             fetch: Fetch::Idle,
             // The stock file manager's own order to start with: folders
             // first, then by name.
@@ -2179,6 +2186,8 @@ pub enum Effect {
     StartFetch { url: String, name: String },
     /// Stop taking it.
     StopFetch,
+    /// Read /sdcard/Download/link.txt, where a computer put the address.
+    FetchFromFile,
     /// Start receiving a package over USB.
     Sideload,
     /// Start installing the file at this path from the top of a place,
@@ -5456,6 +5465,33 @@ impl App {
         self.refresh();
     }
 
+    /// The address the page a link is typed on is served at, while the
+    /// download page shows; none while it is not served.
+    pub fn set_fetch_portal(&mut self, at: Option<String>) {
+        if self.state.fetch_portal != at {
+            self.state.fetch_portal = at;
+            if self.screen() == Screen::Fetch {
+                self.refresh();
+            }
+        }
+    }
+
+    /// A link another device passed through that page: it fills the field,
+    /// ready to be started.
+    pub fn fetch_link(&mut self, link: String, now: u64) {
+        if self.screen() == Screen::Fetch {
+            self.state.fetch_url = link;
+            self.blink = None;
+            self.refresh();
+            self.say(self.state.lang.pick(["链接已填入", "連結已填入", "The address is filled in"]), now);
+        }
+    }
+
+    /// The address was not where the page went looking for it: why is said.
+    pub fn fetch_link_missing(&mut self, why: String, now: u64) {
+        self.say(&why, now);
+    }
+
     fn say(&mut self, text: &str, now: u64) {
         self.toast = Some((text.to_string(), now + TOAST_MS));
         self.dirty = true;
@@ -5893,6 +5929,7 @@ impl App {
             }
             Action::OpenData => return self.open_data(),
             Action::StopFetch => return vec![Effect::StopFetch],
+            Action::FetchFromFile => return vec![Effect::FetchFromFile],
             Action::Skip => {
                 self.leave(true);
                 if self.stack.len() > 1 {

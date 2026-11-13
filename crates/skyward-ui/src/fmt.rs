@@ -1442,6 +1442,17 @@ pub fn wireless_failed(l: Lang, why: &str) -> String {
     tr!(l, "无法开启无线传输：{why}", "無法開啟無線傳輸：{why}", "Couldn't start wireless transfer: {why}")
 }
 
+/// The file the download page was told to take a link from holds none.
+pub fn no_link_in(l: Lang, at: String) -> String {
+    tr!(l, "{at} 里没有链接", "{at} 裡沒有連結", "{at} holds no address")
+}
+
+/// The file the download page was told to take a link from could not be
+/// read, as the system says why.
+pub fn no_link_at(l: Lang, at: String, why: &str) -> String {
+    tr!(l, "读不到 {at}：{why}", "讀不到 {at}：{why}", "Couldn't read {at}: {why}")
+}
+
 /// File transfer stopped on its own, as the system says why.
 pub fn transfer_stopped(l: Lang, why: &str) -> String {
     tr!(l, "文件传输已停止：{why}", "檔案傳輸已停止：{why}", "File transfer stopped: {why}")

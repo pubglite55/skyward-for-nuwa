@@ -1,5 +1,8 @@
 [workspace]
 resolver = "2"
+# The QR code generator is a vendored crate of its own: it is built as
+# skyward-ui's dependency, and not linted as one of ours.
+exclude = ["vendor/qrcodegen"]
 members = [
     "crates/skyward",
     "crates/skyward-config",

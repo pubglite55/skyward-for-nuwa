@@ -31,6 +31,7 @@ use skyward_files::Ownership;
 use skyward_block::usb::{self, Drive};
 use skyward_net::download::{self, Failure};
 use skyward_net::http::Servers;
+use skyward_net::portal;
 use skyward_net::release::{Installed, Release, Unanswered};
 use skyward_net::wlan::{Power as WlanPower, Stage as Joining, Wlan};
 use skyward_sys::sleep::{Sleeper, Slept};
@@ -1003,6 +1004,10 @@ fn install_options(app: &App) -> Options {
 /// How often the WLAN page scans while it shows.
 const SCAN_EVERY: Duration = Duration::from_secs(10);
 
+/// How often the page a link is typed on is tried again while the download
+/// page shows and the phone has no address yet.
+const PORTAL_RETRY: Duration = Duration::from_secs(2);
+
 fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
     w.as_ref().context("the phone's WLAN is not brought up")
 }
@@ -1067,9 +1072,13 @@ fn kept_network(
 /// The address the files served are reached by, where the phone has one:
 /// the address its WLAN interface was given.
 fn wireless_url(cfg: &DeviceConfig, port: u16) -> Option<String> {
+    Some(format!("http://{}:{port}/", wireless_address(cfg)?))
+}
+
+/// The address the phone's WLAN interface was given, where it has one.
+fn wireless_address(cfg: &DeviceConfig) -> Option<String> {
     let interface = cfg.wlan.as_ref().map(|wlan| wlan.interface.as_str())?;
-    let address = skyward_net::iface::address(interface).ok().flatten()?;
-    Some(format!("http://{address}:{port}/"))
+    skyward_net::iface::address(interface).ok().flatten().map(|address| address.to_string())
 }
 
 /// The installed system, as the update server is told of it.
@@ -1254,6 +1263,11 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // in is open: the switch may be turned before it is.
     let mut files_wanted = false;
     let mut files_at = Instant::now();
+    // The page on the network where a link too long to type is entered on
+    // another device, while the download page shows, and when it was last
+    // tried: a phone whose WLAN is not up yet is tried again while it shows.
+    let mut portal: Option<portal::Portal> = None;
+    let mut portal_tried: Option<Instant> = None;
     if app.state.file_transfer {
         match Transfer::start(cfg, &info, app.state.time_zone) {
             Ok(t) => transfer = Some(t),
@@ -2094,6 +2108,33 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                 app.wireless_at(wireless_url(cfg, server.port()));
             }
             app.wireless_served(server.served());
+        }
+        // A link too long for the recovery's keyboard can be typed on
+        // another device, which opens a page the phone serves: it runs while
+        // the download page shows, and goes with it.
+        if app.screen() == Screen::Fetch {
+            let waiting = portal_tried.is_none_or(|at| at.elapsed() >= PORTAL_RETRY);
+            if portal.is_none() && waiting {
+                portal_tried = Some(Instant::now());
+                if let Some(host) = wireless_address(cfg) {
+                    match portal::Portal::start(&host) {
+                        Ok(p) => {
+                            skyward_sys::kmsg(&format!("the page for a passed link is served at {}", p.url()))?;
+                            app.set_fetch_portal(Some(p.url().to_string()));
+                            portal = Some(p);
+                        }
+                        Err(e) => skyward_sys::kmsg(&format!("the page for a passed link did not start: {e:#}"))?,
+                    }
+                }
+            }
+            if let Some(p) = &portal {
+                if let Some(link) = p.take() {
+                    skyward_sys::kmsg(&format!("a link was passed from another device: {link}"))?;
+                    app.fetch_link(link, now);
+                }
+            }
+        } else if portal.take().is_some() {
+            app.set_fetch_portal(None);
         }
         // The WLAN page scans again now and then while it shows, as the
         // stock settings do.

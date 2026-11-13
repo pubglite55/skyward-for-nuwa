@@ -1815,6 +1815,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcodegen"
+version = "1.8.0"
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2524,6 +2528,7 @@ dependencies = [
  "libc",
  "png",
  "proc-macro2",
+ "qrcodegen",
  "serde",
  "serde_json",
  "skyward-info",

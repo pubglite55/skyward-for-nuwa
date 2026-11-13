@@ -1,5 +1,5 @@
 use crate::app::{
-    Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Fetch, Field, FileKind,
+    Action, BackupAt, BackupEnd, BackupJob, Cap, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Fetch, Field, FileKind,
     FileOp, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows, Screen,
     SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, SortKey, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe,
     ADDABLE,
@@ -3226,16 +3226,66 @@ const REMEMBER: Text = ["记住锁屏密码", "記住螢幕鎖定密碼", "Remem
 /// downloads folder: the address, how far it has come, and how it ended.
 pub fn fetch(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let m = &t.m;
     let mut c = page(cx);
     let mut out = Vec::new();
-    let top = t.m.content_top;
+    let top = m.content_top;
     let (mut y, caret) = widgets::text_field(&mut c, t, f, top, &s.fetch_url);
-    let note = l.pick([
-        "以 http:// 或 https:// 开头，文件保存到内部存储的 Download 文件夹。",
-        "以 http:// 或 https:// 開頭，檔案儲存到內部儲存空間的 Download 資料夾。",
-        "It starts with http:// or https://, and is saved in Download in internal storage.",
+    // The keys take the bottom of the screen: what the page puts above them
+    // is planned against the room left over.
+    let floor = m.h as f32 - widgets::keyboard_height(t) - m.dp(8.0);
+    let running = matches!(s.fetch, Fetch::Running { .. });
+    // The button, of its own width in the middle of the page.
+    let (bh, bw) = (m.dp(48.0), m.dp(220.0).min(m.w as f32 - m.margin * 2.0));
+    let (bx, by) = ((m.w as f32 - bw) / 2.0, y + m.dp(14.0));
+    c.fill_round_rect(bx, by, bw, bh, bh / 2.0, t.pal.accent);
+    let label = l.pick(if running { STOP_FETCH } else { START_FETCH });
+    c.text_center(&f.heading, label, bx + bw / 2.0, by + bh / 2.0, m.row_title_px, Rgba::rgb(255, 255, 255));
+    let button = Rect::new(bx, by, bw, bh);
+    out.push(Hit { rect: button, action: if running { Action::StopFetch } else { Action::Type(Cap::Enter) } });
+    y = by + bh;
+    // A link too long to type can be put in a small file from a computer,
+    // and taken from there with one tap.
+    y += m.dp(12.0);
+    let from_file = l.pick([
+        "从 /sdcard/Download/link.txt 读链接",
+        "從 /sdcard/Download/link.txt 讀連結",
+        "Take the link from /sdcard/Download/link.txt",
     ]);
-    y = widgets::footnote(&mut c, t, f, y, note);
+    c.text_center(&f.body, from_file, m.w as f32 / 2.0, y + m.dp(16.0), m.sub_px, t.pal.accent);
+    out.push(Hit { rect: Rect::new(m.margin, y, m.w as f32 - m.margin * 2.0, m.dp(32.0)), action: Action::FetchFromFile });
+    y += m.dp(32.0);
+    // A link too long for this keyboard can be typed on another device,
+    // which opens a page this recovery serves; the code below is where that
+    // page is.
+    if let Some(at) = &s.fetch_portal {
+        let caption = m.dp(56.0);
+        let room = (floor - y - caption - m.dp(14.0)).max(m.dp(72.0));
+        let side = m.dp(168.0).min(m.w as f32 - m.margin * 2.0).min(room);
+        let x0 = (m.w as f32 - side) / 2.0;
+        let quiet = 2.0f32;
+        if let Ok(code) = qrcodegen::QrCode::encode_text(at, qrcodegen::QrCodeEcc::Medium) {
+            let n = code.size();
+            let cell = side / (n as f32 + quiet * 2.0);
+            c.fill_round_rect(x0 - m.dp(10.0), y - m.dp(4.0), side + m.dp(20.0), side + m.dp(20.0), m.dp(12.0), Rgba::rgb(255, 255, 255));
+            for row in 0..n {
+                for col in 0..n {
+                    if code.get_module(col, row) {
+                        let px = x0 + (col as f32 + quiet) * cell;
+                        let py = y + m.dp(4.0) + (row as f32 + quiet) * cell;
+                        c.fill_rect(px, py, cell + 0.5, cell + 0.5, Rgba::rgb(12, 12, 16));
+                    }
+                }
+            }
+        }
+        y += side + m.dp(16.0);
+        let how = l.pick([
+            "用另一台手机扫这个码，在网页里输入网址，发回来就填进上面的框",
+            "用另一台手機掃這個碼，在網頁裡輸入網址，傳回來就填進上面的框",
+            "Scan this on another device, type the address there, and it fills the field above",
+        ]);
+        y = widgets::footnote(&mut c, t, f, y - m.dp(8.0), how);
+    }
     match &s.fetch {
         Fetch::Idle => {}
         Fetch::Running { name, done, total, rate } => {
@@ -3244,12 +3294,8 @@ pub fn fetch(cx: &Ctx) -> Frame {
             let (came, all, pace) = (fmt::file_size(*done), fmt::file_size(*total), fmt::file_size(*rate));
             let how = tr!(l, "已下载 {came}，共 {all}", "已下載 {came}，共 {all}", "{came} of {all}");
             let speed = tr!(l, "速度 {pace}/s", "速度 {pace}/s", "{pace}/s");
-            let rows = [
-                Row::new(name.as_str()).icon(BLUE, Icon::Folder).subtitle(&how).trail(Trail::Value(speed.as_str())),
-                Row::new(l.pick(["停止下载", "停止下載", "Stop downloading"])).tint(t.pal.danger).trail(Trail::None),
-            ];
-            let list = widgets::list(&mut c, t, f, y + t.m.dp(18.0), &rows);
-            out.extend(hits(&list.rows[1..], &[Action::StopFetch]));
+            let rows = [Row::new(name.as_str()).icon(BLUE, Icon::Folder).subtitle(&how).trail(Trail::Value(speed.as_str()))];
+            widgets::list(&mut c, t, f, y + t.m.dp(18.0), &rows);
         }
         Fetch::Done { name } => {
             let saved = l.pick([
@@ -3277,6 +3323,7 @@ pub fn fetch(cx: &Ctx) -> Frame {
 
 const FETCH: Text = ["网络下载", "網路下載", "Download"];
 const START_FETCH: Text = ["下载", "下載", "Download"];
+const STOP_FETCH: Text = ["停止下载", "停止下載", "Stop"];
 
 /// The order the file manager lists entries in: what they are put in order
 /// by, which way, and whether folders stand before files.
