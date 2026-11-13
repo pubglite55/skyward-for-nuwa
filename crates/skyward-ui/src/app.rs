@@ -6996,6 +6996,8 @@ impl App {
                 }
                 Drag::Waking => self.drag = Drag::Waking,
                 Drag::Held => self.drag = Drag::Held,
+                // The control centre's own fingers are taken before this.
+                Drag::Shade { .. } => {}
                 Drag::Idle => {}
             },
             Touch::Up => match std::mem::replace(&mut self.drag, Drag::Idle) {
