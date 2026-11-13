@@ -3120,7 +3120,7 @@ impl App {
         if let (true, Some(after)) = (self.display_on, SCREEN_OFF[self.state.screen_off]) {
             let idle = now.saturating_sub(active);
             if idle >= after {
-                self.sleep(now);
+                self.sleep(now, true);
             } else if idle >= after - dim_span(after) {
                 self.bright.set(false, now);
             }
@@ -3130,7 +3130,7 @@ impl App {
         if self.display_on && self.charging.as_ref().is_some_and(|c| c.shown.on && now >= c.since + CHARGE_MS) {
             let c = self.charging.as_mut().expect("the charging screen shows");
             if c.dark_after {
-                self.sleep(now);
+                self.sleep(now, true);
             } else {
                 c.shown.set(false, now);
             }
@@ -3378,12 +3378,15 @@ impl App {
     /// Turn the panel off: the content goes dark under the backlight it has
     /// now, then the panel goes off. A finger on the glass lets go of what
     /// it held, and the page stops where it is.
-    fn sleep(&mut self, now: u64) {
+    fn sleep(&mut self, now: u64, lock: bool) {
         self.darkening = self.panel(now);
         self.curtain.set(false, now);
         self.display_on = false;
-        // What comes on next comes on over the lock screen.
-        self.state.locked = true;
+        // A panel that went dark on its own comes on with the lock screen; a
+        // power key press turns it off and on again without one.
+        // A phone whose touch panel did not come up has no knob to slide,
+        // so its page comes back as it was.
+        self.state.locked = lock && !self.keys;
         self.state.lock_pull = 0.0;
         self.refresh();
         self.bright = full_brightness();
@@ -6759,19 +6762,6 @@ impl App {
             self.button = Some((key, Press::Spent));
             return fx;
         }
-        // On the lock screen the power key opens the restart page, as the
-        // phone's own does from its lock screen; the other keys do nothing
-        // until the knob is slid home.
-        if self.state.locked {
-            if key == Key::Power {
-                self.state.locked = false;
-                self.state.lock_pull = 0.0;
-                self.refresh();
-                self.open(Screen::Reboot);
-            }
-            self.button = Some((key, Press::Spent));
-            return fx;
-        }
         self.stir(now);
         if matches!(key, Key::Power | Key::VolumeDown) {
             self.chord = Some((key, now));
@@ -6836,7 +6826,7 @@ impl App {
                     // Turning the screen off, the key ticks the motor.
                     None => {
                         self.button = Some((key, Press::Spent));
-                        self.sleep(now);
+                        self.sleep(now, false);
                         return vec![Effect::Ticks];
                     }
                 }
@@ -7816,12 +7806,18 @@ mod tests {
         let mut app = App::new(Screen::Home, W, SNUG, PPD);
         let fr = app.frame(&f, &plain);
         let reboot = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Reboot)).expect("a reboot row").rect;
-        assert!(reboot.y + reboot.h <= SNUG as f32, "without the notice the rows fit the screen");
+        // The screen the page's rows fit on, measured from the page itself so
+        // that a row added to the page moves it too.
+        let snug = (reboot.y + reboot.h + 20.0).ceil() as u32;
+        let mut app = App::new(Screen::Home, W, snug, PPD);
+        let fr = app.frame(&f, &plain);
+        let reboot = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Reboot)).expect("a reboot row").rect;
+        assert!(reboot.y + reboot.h <= snug as f32, "without the notice the rows fit the screen");
         let i = DeviceInfo { snapshot: SnapshotState::Snapshotted, ..info() };
-        let mut app = App::new(Screen::Home, W, SNUG, PPD);
+        let mut app = App::new(Screen::Home, W, snug, PPD);
         let fr = app.frame(&f, &i);
         let reboot = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Reboot)).expect("a reboot row").rect;
-        assert!(reboot.y + reboot.h > SNUG as f32, "the notice pushes the last row below the screen");
+        assert!(reboot.y + reboot.h > snug as f32, "the notice pushes the last row below the screen");
         assert!(reboot.y + reboot.h <= fr.canvas.h as f32, "the page is drawn down to it");
         app.touch(Touch::Down(700.0, 2800.0), &f, 0);
         app.touch(Touch::Move(700.0, 2000.0), &f, 0);
@@ -10318,7 +10314,7 @@ mod tests {
     fn the_dark_panel_lights_on_a_double_tap_and_the_lock_screen_lets_it_go() {
         let (f, _i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
-        app.sleep(1000);
+        app.sleep(1000, true);
         assert!(!app.display_on(), "the panel is dark");
         app.touch(Touch::Down(100.0, 300.0), &f, 1000);
         assert!(!app.display_on(), "one tap lights nothing");
