@@ -63,6 +63,10 @@ pub struct Band {
 }
 
 pub fn render(screen: Screen, cx: &Ctx) -> Frame {
+    // The lock screen stands over whatever page is under it.
+    if cx.state.locked {
+        return lock(cx);
+    }
     match screen {
         Screen::Decrypt => decrypt(cx),
         Screen::Home => home(cx),
@@ -437,6 +441,35 @@ fn skyward_value(cx: &Ctx) -> Option<&'static str> {
 
 /// How long the screen stays on with nothing touched, opened from the
 /// settings.
+/// The screen the panel comes on with: the time in large type, the battery
+/// under it, and a knob to slide to the right, which lets the page under it
+/// be used again.
+pub fn lock(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = page(cx);
+    let m = &t.m;
+    let mid = m.w as f32 / 2.0;
+    let time = match s.clock.is_empty() {
+        true => "--:--",
+        false => s.clock.as_str(),
+    };
+    c.text_center(&f.title, time, mid, m.h as f32 * 0.30, m.dp(84.0), t.pal.text);
+    let battery = match cx.info.battery.as_ref() {
+        Some(b) => format!("{}%", b.level),
+        None => l.pick(["电量未知", "電量未知", "Battery not read"]).to_string(),
+    };
+    c.text_center(&f.body, &battery, mid, m.h as f32 * 0.30 + m.dp(76.0), m.sub_px, t.pal.subtitle);
+    let note = l.pick(["向右滑动解锁", "向右滑動解鎖", "Slide right to unlock"]);
+    let bar = m.w as f32 * 0.62;
+    let y = m.h as f32 * 0.76;
+    c.text_center(&f.body, note, mid, y - m.dp(34.0), m.sub_px, t.pal.subtitle);
+    widgets::progress_bar(&mut c, t, mid - bar / 2.0, y, bar, s.lock_pull);
+    let mut frame = Frame::new(t, c, Vec::new(), "", m.content_top);
+    frame.back = false;
+    frame.header = false;
+    frame
+}
+
 pub fn screen_off(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let mut c = page(cx);
@@ -704,22 +737,15 @@ pub fn decrypt(cx: &Ctx) -> Frame {
     let (c, l) = (page(cx), cx.state.lang);
     match &cx.state.data {
         Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
-        Data::Closed | Data::Opening => {
-            let opening = matches!(cx.state.data, Data::Opening);
-            let note = match opening {
-                true => data_stage(l, cx.state.opening),
-                false => l.pick(["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"]),
-            };
-            data_status(
-                cx,
-                c,
-                Icon::Lock,
-                l.pick(["解密 data 分区", "解密 data 分割區", "Decrypt the data partition"]),
-                Some(note),
-                None,
-                opening.then_some(cx.state.opening),
-            )
-        }
+        Data::Closed | Data::Opening => data_status(
+            cx,
+            c,
+            Icon::Lock,
+            l.pick(["解密 data 分区", "解密 data 分割區", "Decrypt the data partition"]),
+            Some(l.pick(["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"])),
+            None,
+            matches!(cx.state.data, Data::Opening).then_some(cx.state.opening),
+        ),
         Data::Open => data_status(
             cx,
             c,
@@ -742,19 +768,6 @@ pub fn decrypt(cx: &Ctx) -> Frame {
     }
 }
 
-/// What the opening of the data partition is at, as its page says it: the
-/// steps the work reports, from the partition being opened to the users'
-/// keys being installed.
-fn data_stage(l: Lang, value: f32) -> &'static str {
-    match (value * 5.0).round() as u8 {
-        0 | 1 => l.pick(["正在打开分区", "正在開啟分割區", "Opening the partition"]),
-        2 => l.pick(["正在导入共享密钥", "正在匯入共用金鑰", "Installing the shared keys"]),
-        3 => l.pick(["正在读取用户密钥", "正在讀取使用者金鑰", "Reading the users' keys"]),
-        4 => l.pick(["正在登记系统服务", "正在登記系統服務", "Registering the system services"]),
-        _ => l.pick(["正在收尾", "正在收尾", "Finishing"]),
-    }
-}
-
 /// Where the partition stands, under its sign: a line on it, or why it
 /// did not open and a way to try again; then the way off the page.
 fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&str>, why: Option<&str>, progress: Option<f32>) -> Frame {
@@ -764,21 +777,12 @@ fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&s
     let sign_cy = m.dp(150.0);
     c.fill_circle(x, sign_cy, m.dp(30.0), t.pal.card);
     icons::glyph(&mut c, icon, x, sign_cy, m.dp(40.0), t.pal.accent);
-    // While the partition is being opened, the sign wears the share of the
-    // work done as a ring, as the page this one is taken from has it.
-    if let Some(value) = progress {
-        let r = m.dp(38.0);
-        let thin = m.dp(2.5);
-        c.stroke_circle(x, sign_cy, r, thin, t.pal.text.with_alpha(28));
-        let start = -std::f32::consts::FRAC_PI_2;
-        c.stroke_arc(x, sign_cy, r, start, std::f32::consts::TAU * value.clamp(0.0, 1.0), thin, t.pal.accent);
-    }
     c.text_center(&f.heading, title, x, sign_cy + m.dp(64.0), m.dp(24.0), t.pal.text);
     if let Some(note) = note {
         c.text_center(&f.body, note, x, sign_cy + m.dp(98.0), m.sub_px, t.pal.subtitle);
     }
     if let Some(value) = progress {
-        widgets::progress_bar(&mut c, t, x - m.dp(100.0), sign_cy + m.dp(122.0), m.dp(200.0), value);
+        widgets::progress_bar(&mut c, t, x - m.dp(80.0), sign_cy + m.dp(122.0), m.dp(160.0), value);
     }
     let mut out = Vec::new();
     if let Some(why) = why {

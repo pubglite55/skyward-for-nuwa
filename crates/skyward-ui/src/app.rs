@@ -9,7 +9,6 @@ use crate::focus::{self, Group, Spot, Stop};
 use crate::font::Fonts;
 use crate::geom::Rect;
 use crate::glow::{self, GlowClock};
-use crate::icons::{self, Icon};
 use crate::lang::{Lang, Text};
 use crate::motion::{self, Spring};
 use crate::pages::{self, Band, Ctx};
@@ -557,29 +556,6 @@ pub enum PartStop {
 pub enum Slider {
     Brightness,
     /// How strongly the motor taps.
-    Vibration,
-}
-
-/// How far the control centre has to be pulled, in dp, to be open, and how
-/// long its spring takes to settle.
-const SHADE_PULL_DP: f32 = 110.0;
-const SHADE_PERIOD: f32 = 1.8;
-const SHADE_KEEPS: f32 = 0.36;
-/// How tall the control centre's sheet is, in dp, at full pull.
-const SHADE_HEIGHT_DP: f32 = 368.0;
-
-/// How long after the control centre is shut the screenshot is taken, so that
-/// what is captured is the page under it and not the sheet itself.
-const SHOT_AFTER_MS: u64 = 130;
-
-/// What a finger can press in the control centre.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ShadeHit {
-    Wlan,
-    Screenshot,
-    Reboot,
-    Sleep,
-    Brightness,
     Vibration,
 }
 
@@ -2181,14 +2157,6 @@ pub enum Touch {
     Up,
 }
 
-/// The lock over the page: how far its knob has been slid to the right,
-/// from 0 to 1, and when it was raised.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Lock {
-    pub drag: f32,
-    pub since: u64,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
     Power,
@@ -2420,9 +2388,6 @@ enum Drag {
     /// threshold, lifting goes back.
     Edge { start: f32, from_left: bool, armed: bool, x: f32, cy: f32 },
     Slider(Slider, Rect),
-    /// Pulling the control centre down from the top edge: where the finger
-    /// came down, and how far the sheet was open then.
-    Shade { start: f32, from: f32 },
     Confirm { which: Confirm, track: Rect, grab: f32 },
     /// Scrolling a terminal's screen back through what the shell wrote, or
     /// the editor's text, `carry` being the part of a row not yet scrolled.
@@ -2948,21 +2913,8 @@ pub struct App {
     /// A tap on the dark panel, and where it landed: two close together in
     /// time and place light it.
     tapped: Option<(u64, f32, f32)>,
-    /// The lock over the page, while it stands.
-    lock: Option<Lock>,
-    /// The control centre pulled down from the top edge: how far, in shares
-    /// of its full pull, and the spring it settles on once a finger lets go.
-    shade: f32,
-    shade_settle: Option<(u64, f32, f32, f32, f32)>,
-    shade_last: Option<(u64, f32)>,
-    shade_speed: f32,
-    shade_press: Option<(ShadeHit, f32)>,
-    shade_hits: Vec<(Rect, ShadeHit)>,
-    /// When the screenshot a tile asked for is taken, once the sheet has gone
-    /// and the page under it has been drawn.
-    shot_when: Option<u64>,
-    /// Today, as the lock screen writes it; empty until the recovery tells it.
-    date: String,
+    /// Where the finger went down on the lock screen's knob.
+    lock_from: Option<f32>,
     /// The About page's moving field, while that page shows.
     glow: Option<GlowClock>,
     /// The terminal page's shell, from when it is first opened; it goes on
@@ -3056,15 +3008,7 @@ impl App {
             dither: None,
             toast: None,
             tapped: None,
-            lock: None,
-            shade: 0.0,
-            shade_settle: None,
-            shade_last: None,
-            shade_speed: 0.0,
-            shade_press: None,
-            shade_hits: Vec::new(),
-            shot_when: None,
-            date: String::new(),
+            lock_from: None,
             drag: Drag::Idle,
             tracker: Tracker::default(),
             fling: None,
@@ -3112,16 +3056,6 @@ impl App {
         self.corners = radius;
     }
 
-    /// Today, as the lock screen writes it.
-    pub fn set_date(&mut self, date: String) {
-        if self.date != date {
-            self.date = date;
-            if self.lock.is_some() {
-                self.dirty = true;
-            }
-        }
-    }
-
     pub fn theme(&self) -> Theme {
         if self.state.dark {
             Theme::dark(self.w, self.h, self.px_per_dp)
@@ -3165,8 +3099,6 @@ impl App {
                 || self.morph.is_some()
                 || self.turn.is_some()
                 || self.row_press.is_some_and(|p| p.changing(now) || p.gone(now))
-                || self.shade_settle.is_some()
-                || self.shot_when.is_some()
                 || self.glowing());
         // The content going dark or coming up, and the charging screen's
         // tide, move a frame at a time while the panel is lit.
@@ -3228,33 +3160,6 @@ impl App {
     /// deadline goes away.
     pub fn tick(&mut self, now: u64) -> Vec<Effect> {
         let mut fx = Vec::new();
-        // A screenshot asked for on the control centre is taken once the sheet
-        // has been shut and a frame of the page under it has gone to the panel,
-        // so that the shot holds the page and not the sheet.
-        if let Some(at) = self.shot_when {
-            if now >= at && self.shade <= 0.0 {
-                self.shot_when = None;
-                fx.push(Effect::Screenshot { storage: self.state.place_open(Place::Storage) });
-            } else {
-                self.dirty = true;
-            }
-        }
-        // The control centre, let go, settles into place: it comes to rest in
-        // one move, easing out, rather than swinging about the place it is
-        // headed for.
-        if let Some((at, from, _speed, period, target)) = self.shade_settle {
-            let t = now.saturating_sub(at) as f32 / 1000.0;
-            let k = (t / period).clamp(0.0, 1.0);
-            // Slow to set off and slow to come to rest, as a sheet sliding
-            // under its own weight: smoothstep, not a quick ease-out.
-            let eased = k * k * (3.0 - 2.0 * k);
-            self.shade = ((target + from * (1.0 - eased)) / SHADE_PULL_DP).clamp(0.0, 1.0);
-            if k >= 1.0 {
-                self.shade_settle = None;
-                self.shade = (target / SHADE_PULL_DP).clamp(0.0, 1.0);
-            }
-            self.dirty = true;
-        }
         // The key waiting for its partner in a screenshot, left alone long
         // enough, does what it does alone.
         if self.chord.is_some_and(|(_, at)| now >= at + CHORD_MS) {
@@ -3478,9 +3383,7 @@ impl App {
             self.darkening = None;
             self.curtain.set(true, now);
         }
-        if let Some(lock) = &mut self.lock {
-            lock.drag = 0.0;
-        }
+        self.state.lock_pull = 0.0;
         self.woke_at = Some(now);
         self.stir(now);
     }
@@ -3543,13 +3446,12 @@ impl App {
         self.darkening = self.panel(now);
         self.curtain.set(false, now);
         self.display_on = false;
-        self.shade = 0.0;
-        self.shade_settle = None;
-        // A panel that went dark on its own comes on with the lock over the
-        // page; a power key press turns it off and on again without one, and
-        // so does a phone whose touch panel did not come up, which would have
-        // no knob to slide.
-        self.lock = (lock && !self.keys).then_some(Lock { drag: 0.0, since: now });
+        // A panel that went dark on its own comes on with the lock screen; a
+        // power key press turns it off and on again without one.
+        // A phone whose touch panel did not come up has no knob to slide,
+        // so its page comes back as it was.
+        self.state.locked = lock && !self.keys;
+        self.state.lock_pull = 0.0;
         self.refresh();
         self.bright = full_brightness();
         match std::mem::replace(&mut self.drag, Drag::Idle) {
@@ -4583,11 +4485,6 @@ impl App {
     /// it scrolls into view; that done, make the About page field's dither,
     /// for that page to open without making it. Whether any is left to do.
     pub fn draw_ahead(&mut self, f: &Fonts, info: &DeviceInfo) -> bool {
-        // The lock covers the page, so rows drawn under it would only show
-        // through it.
-        if self.lock.is_some() {
-            return false;
-        }
         let Some(frame) = &self.frame else { return false };
         let (held, h) = (frame.canvas.held(), frame.canvas.h);
         if self.cols < self.w {
@@ -4665,6 +4562,10 @@ impl App {
     /// while a cable has just gone in, both as dark as the content stands
     /// as the panel goes off or comes up.
     pub fn compose(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
+        if self.state.clock != clock {
+            self.state.clock.clear();
+            self.state.clock.push_str(clock);
+        }
         let charge = self.charging.as_ref().map_or(0.0, |c| c.shown.level(now));
         if charge < 1.0 {
             self.compose_page(out, f, info, clock, now);
@@ -4672,301 +4573,7 @@ impl App {
         if charge > 0.0 {
             self.compose_charging(out, f, info, charge, now);
         }
-        self.paint_shade(out, f, info, clock);
-        if let Some(lock) = self.lock {
-            self.compose_lock(out, f, info, clock, lock.drag);
-        }
         out.dim(self.curtain.level(now));
-    }
-
-    /// The lock over the page: the time in large type, the battery under it,
-    /// and a knob to slide to the right along the foot of the screen.
-    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, drag: f32) {
-        let t = self.theme();
-        let lang = self.state.lang;
-        let m = &t.m;
-        let (w, h) = (m.w as f32, m.h as f32);
-        out.fill_rect(0.0, 0.0, w, h, Rgba::rgb(6, 6, 8).with_alpha(226));
-        if !self.date.is_empty() {
-            out.text_center(&f.body, &self.date, w / 2.0, h * 0.098, m.dp(19.0), Rgba::rgb(198, 202, 212));
-        }
-        out.text_center(&f.title, clock, w / 2.0, h * 0.138, m.dp(72.0), Rgba::rgb(236, 238, 242));
-        if let Some(b) = info.battery.as_ref() {
-            let percent = format!("{}%", b.level);
-            let note = match b.charging() {
-                true => format!("{percent} · {}", lang.pick(["充电中", "充電中", "Charging"])),
-                false => percent,
-            };
-            out.text_center(&f.body, &note, w / 2.0, h * 0.168, m.dp(17.0), Rgba::rgb(150, 154, 164));
-        }
-        let track = self.lock_track();
-        let label = lang.pick(["滑动解锁", "滑動解鎖", "Slide to unlock"]);
-        widgets::confirm(out, &t, f, track.y, label, false, drag);
-    }
-
-    /// The control centre, pulled down from the top edge: the time and the
-    /// battery, the four toggles a recovery has a use for, and the two
-    /// sliders. The page under it shows as it was, darkened.
-    fn paint_shade(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str) {
-        self.shade_hits.clear();
-        if self.shade <= 0.0 {
-            return;
-        }
-        let t = self.theme();
-        let m = &t.m;
-        let w = m.w as f32;
-        let l = self.state.lang;
-        let white = Rgba::rgb(255, 255, 255);
-        let tall = m.dp(SHADE_HEIGHT_DP);
-        let sheet = (tall * self.shade).clamp(0.0, tall);
-        let top = sheet - tall;
-        // The page under the sheet is put back as it was, darkened, so the
-        // sheet reads as over it rather than on it.
-        out.fill_rect(0.0, 0.0, w, m.h as f32, Rgba::rgb(0, 0, 0).with_alpha((self.shade * 140.0) as u8));
-        // The sheet itself, its foot rounded off.
-        let pane = Rgba::rgb(20, 20, 26).with_alpha(238);
-        let skirt = m.dp(30.0).min(sheet);
-        out.fill_rect(0.0, 0.0, w, sheet - skirt, pane);
-        out.fill_circle(m.dp(30.0), sheet - skirt, skirt, pane);
-        out.fill_circle(w - m.dp(30.0), sheet - skirt, skirt, pane);
-        out.fill_rect(m.dp(30.0), sheet - skirt, w - m.dp(60.0), skirt, pane);
-        // A grabber at the foot of the sheet.
-        out.fill_round_rect(w / 2.0 - m.dp(18.0), sheet - m.dp(15.0), m.dp(36.0), m.dp(5.0), m.dp(2.5), white.with_alpha(80));
-        // The time at the top left, what is left in the battery at the top
-        // right, as the screenshot this sheet is taken from has them.
-        out.text(&f.heading, clock, m.margin, top + m.dp(52.0), m.dp(38.0), white, None);
-        if let Some((level, _)) = self.bar(clock, info).battery {
-            let said = format!("{level}%");
-            let wide = out.text_width(&f.body, &said, m.sub_px);
-            out.text(&f.body, &said, w - m.margin - wide, top + m.dp(47.0), m.sub_px, white.with_alpha(190), None);
-        }
-        // The toggles, as round-cornered panes over the sheet.
-        let on = self.state.wlan.as_ref().is_some_and(|w| w.power == Power::On);
-        let wlan = match on {
-            true => l.pick(["WLAN · 已开", "WLAN · 已開", "WLAN · on"]),
-            false => l.pick(["WLAN · 已关", "WLAN · 已關", "WLAN · off"]),
-        };
-        let tiles: [(ShadeHit, &str, bool); 4] = [
-            (ShadeHit::Wlan, wlan, on),
-            (ShadeHit::Screenshot, l.pick(["截图", "截圖", "Screenshot"]), false),
-            (ShadeHit::Reboot, l.pick(["重启", "重新啟動", "Reboot"]), false),
-            (ShadeHit::Sleep, l.pick(["熄屏", "關閉螢幕", "Screen off"]), false),
-        ];
-        let (gap, th) = (m.dp(12.0), m.dp(76.0));
-        let tw = (w - m.margin * 2.0 - gap) / 2.0;
-        let tiles_top = top + m.dp(82.0);
-        let mut hits = Vec::new();
-        for (i, (hit, label, lit)) in tiles.iter().enumerate() {
-            let (col, row) = (i % 2, i / 2);
-            let x = m.margin + col as f32 * (tw + gap);
-            let y = tiles_top + row as f32 * (th + gap);
-            let rect = Rect::new(x, y, tw, th);
-            let fill = if *lit { t.pal.accent.with_alpha(72) } else { white.with_alpha(20) };
-            out.fill_round_rect(x, y, tw, th, m.dp(20.0), fill);
-            let ink = if *lit { white } else { white.with_alpha(238) };
-            Self::shade_glyph(out, &t, *hit, x + m.dp(28.0), y + m.dp(28.0), m.dp(22.0), ink);
-            out.text(&f.body, label, x + m.dp(16.0), y + th - m.dp(14.0), m.sub_px, ink, None);
-            hits.push((rect, *hit));
-        }
-        // The backlight and the motor, each over a track.
-        let glyph_x = m.margin + m.dp(11.0);
-        let label_x = m.margin + m.dp(32.0);
-        let (track_h, knob) = (m.dp(7.0), m.dp(19.0));
-        let mut row = tiles_top + 2.0 * (th + gap) + m.dp(18.0);
-        for (which, hit, name) in [
-            (Slider::Brightness, ShadeHit::Brightness, l.pick(["亮度", "亮度", "Brightness"])),
-            (Slider::Vibration, ShadeHit::Vibration, l.pick(["振动", "震動", "Vibration"])),
-        ] {
-            let value = self.level(which);
-            Self::shade_glyph(out, &t, hit, glyph_x, row - m.dp(4.0), m.dp(19.0), white.with_alpha(210));
-            out.text(&f.body, name, label_x, row, m.sub_px, white.with_alpha(210), None);
-            let track = Rect::new(m.margin, row + m.dp(12.0), w - m.margin * 2.0, track_h);
-            out.fill_round_rect(track.x, track.y, track.w, track.h, track.h / 2.0, white.with_alpha(28));
-            let filled = (track.w * value.clamp(0.0, 1.0)).max(track.h);
-            out.fill_round_rect(track.x, track.y, filled, track.h, track.h / 2.0, t.pal.accent);
-            out.fill_circle(track.x + filled - track.h / 2.0, track.y + track.h / 2.0, knob / 2.0, white);
-            hits.push((track, hit));
-            row += m.dp(12.0) + track_h + m.dp(30.0);
-        }
-        self.shade_hits = hits;
-    }
-
-    /// The glyph on a tile of the control centre, or beside a slider.
-    fn shade_glyph(out: &mut Canvas, t: &Theme, hit: ShadeHit, cx: f32, cy: f32, size: f32, ink: Rgba) {
-        let stroke = (size * 0.075).max(t.m.dp(1.6));
-        match hit {
-            ShadeHit::Wlan => icons::glyph(out, Icon::Wlan, cx, cy, size, ink),
-            ShadeHit::Sleep => icons::glyph(out, Icon::Power, cx, cy, size, ink),
-            ShadeHit::Screenshot => {
-                // A camera: its body, the bump over its viewfinder, its lens.
-                let (w, h) = (size * 0.74, size * 0.54);
-                let top = cy - h / 2.0 + size * 0.04;
-                out.stroke_round_rect(cx - w / 2.0, top, w, h, size * 0.13, stroke, ink);
-                out.fill_round_rect(cx - size * 0.12, top - size * 0.10, size * 0.24, size * 0.11, size * 0.045, ink);
-                out.stroke_circle(cx, top + h / 2.0, size * 0.145, stroke, ink);
-            }
-            ShadeHit::Reboot => icons::glyph(out, Icon::Restore, cx, cy, size, ink),
-            ShadeHit::Brightness => {
-                // A sun: its disc and eight rays.
-                out.fill_circle(cx, cy, size * 0.19, ink);
-                for k in 0..8 {
-                    let a = k as f32 * std::f32::consts::TAU / 8.0;
-                    let (sin, cos) = a.sin_cos();
-                    let (r0, r1) = (size * 0.30, size * 0.45);
-                    out.line(cx + cos * r0, cy + sin * r0, cx + cos * r1, cy + sin * r1, stroke, ink);
-                }
-            }
-            ShadeHit::Vibration => {
-                // Three bars, the middle one longer: a motor tapping.
-                for (i, tall) in [0.36f32, 0.68, 0.36].iter().enumerate() {
-                    let x = cx + (i as f32 - 1.0) * size * 0.24;
-                    out.fill_round_rect(x - size * 0.06, cy - size * tall / 2.0, size * 0.12, size * tall, size * 0.06, ink);
-                }
-            }
-        }
-    }
-
-    /// Set one of the sheet's sliders from where a finger is.
-    fn shade_slider(&mut self, which: Slider, track: Rect, x: f32) {
-        let level = ((x - track.x) / track.w).clamp(0.0, 1.0);
-        let value = match which {
-            Slider::Brightness => &mut self.state.brightness,
-            Slider::Vibration => &mut self.state.vibration,
-        };
-        *value = level.clamp(if which == Slider::Brightness { MIN_BRIGHTNESS } else { 0.0 }, 1.0);
-        self.dirty = true;
-    }
-
-    /// Shut the control centre at once, for a tile that opens a page.
-    fn close_shade(&mut self) {
-        self.shade = 0.0;
-        self.shade_settle = None;
-        self.shade_last = None;
-        self.shade_speed = 0.0;
-        self.dirty = true;
-    }
-
-    /// A finger on the control centre, or one pulling it down from the top.
-    fn shade_touch(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
-        let t = self.theme();
-        self.stir(now);
-        match ev {
-            Touch::Down(x, y) => {
-                // A new finger starts the sheet afresh: nothing of the last
-                // pull's inertia is carried into it.
-                self.shade_settle = None;
-                self.shade_speed = 0.0;
-                self.shade_last = None;
-                if self.shade > 0.0 {
-                    let pressed = self.shade_hits.iter().find(|(r, _)| r.contains(x, y)).copied();
-                    if let Some((rect, hit)) = pressed {
-                        match hit {
-                            ShadeHit::Brightness | ShadeHit::Vibration => {
-                                let which = if hit == ShadeHit::Brightness { Slider::Brightness } else { Slider::Vibration };
-                                self.shade_slider(which, rect, x);
-                                self.drag = Drag::Slider(which, rect);
-                            }
-                            _ => self.shade_press = Some((hit, y)),
-                        }
-                        return Vec::new();
-                    }
-                }
-                self.drag = Drag::Shade { start: y, from: self.shade };
-                Vec::new()
-            }
-            Touch::Move(x, y) => {
-                if let Drag::Slider(which, track) = self.drag {
-                    self.shade_slider(which, track, x);
-                    return Vec::new();
-                }
-                // A finger that came down on a tile and then moved was pulling
-                // the sheet: the tile is not pressed after all.
-                if let Some((_, down)) = self.shade_press {
-                    if (y - down).abs() > t.m.dp(14.0) {
-                        self.shade_press = None;
-                        self.drag = Drag::Shade { start: down, from: self.shade };
-                    }
-                }
-                if let Drag::Shade { start, from } = self.drag {
-                    let pulled = from * SHADE_PULL_DP + (y - start);
-                    // A sheet pulled past its end gives less and less.
-                    let eased = if pulled > 0.0 { pulled * (1.0 - 0.22 * (pulled / SHADE_PULL_DP).min(1.0)) } else { pulled };
-                    self.shade = (eased / SHADE_PULL_DP).clamp(0.0, 1.0);
-                    if let Some((was_at, was_y)) = self.shade_last {
-                        let dt = now.saturating_sub(was_at) as f32 / 1000.0;
-                        if dt > 0.0005 {
-                            self.shade_speed = self.shade_speed * 0.55 + ((y - was_y) / dt) * 0.45;
-                        }
-                    }
-                    self.shade_last = Some((now, y));
-                    self.shade_settle = None;
-                    self.dirty = true;
-                }
-                Vec::new()
-            }
-            Touch::Up => {
-                let mut fx = Vec::new();
-                if let Some((hit, _)) = self.shade_press.take() {
-                    match hit {
-                        ShadeHit::Wlan => {
-                            let on = self.state.wlan.as_ref().is_some_and(|w| w.power == Power::On);
-                            fx.push(Effect::Wlan(!on));
-                        }
-                        ShadeHit::Screenshot => {
-                            // The sheet goes first, and the shot is taken a few
-                            // frames later, once the page under it has been
-                            // drawn: taken at once, the sheet would be in it.
-                            self.close_shade();
-                            self.shot_when = Some(now + SHOT_AFTER_MS);
-                        }
-                        ShadeHit::Reboot => {
-                            self.close_shade();
-                            fx.extend(self.act(Action::Open(Screen::Reboot), now));
-                        }
-                        ShadeHit::Sleep => {
-                            self.close_shade();
-                            self.sleep(now, true);
-                        }
-                        ShadeHit::Brightness | ShadeHit::Vibration => {}
-                    }
-                    return fx;
-                }
-                if matches!(self.drag, Drag::Slider(..)) {
-                    self.drag = Drag::Idle;
-                }
-                if matches!(self.drag, Drag::Shade { .. }) {
-                    let dragged = self.shade_last.is_some();
-                    self.drag = Drag::Idle;
-                    // Let go, it carries on a little the way it was going, so a
-                    // flick opens it and a slow drag settles where it got to. A
-                    // finger that only came down and went up again carries no
-                    // speed at all, and the sheet goes to whichever side it is
-                    // nearer.
-                    let heading = match dragged {
-                        true => self.shade + self.shade_speed / 1400.0,
-                        false => self.shade,
-                    };
-                    let target = if heading >= SHADE_KEEPS { SHADE_PULL_DP } else { 0.0 };
-                    // A finger that comes down and up again while the sheet is
-                    // already on its way to this same place does not start it
-                    // over.
-                    let already = self.shade_settle.is_some_and(|(_, _, _, _, heading)| heading == target);
-                    if !already {
-                        let from = self.shade * SHADE_PULL_DP - target;
-                        let speed = self.shade_speed.clamp(-2600.0, 2600.0);
-                        self.shade_settle = Some((now, from, speed, SHADE_PERIOD, target));
-                    }
-                    self.shade_last = None;
-                    self.shade_speed = 0.0;
-                }
-                fx
-            }
-        }
-    }
-
-    /// Whether the control centre is over the page or being pulled out.
-    pub fn shade_busy(&self) -> bool {
-        self.shade > 0.0 || self.shade_settle.is_some() || matches!(self.drag, Drag::Shade { .. })
     }
 
     /// The charging screen, `level` of the way over the page drawn on `out`.
@@ -6932,40 +6539,35 @@ impl App {
     /// lock screen be used again.
     fn slide_lock(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
         self.stir(now);
-        let track = self.lock_track();
-        // The knob's middle runs from the track's left end to its right, so
-        // a finger is read against the run it can push it along.
-        let (from, run) = (track.x + track.h / 2.0, (track.w - track.h).max(1.0));
+        let reach = (self.w as f32 * 0.62).max(1.0);
         match ev {
-            Touch::Down(x, _) | Touch::Move(x, _) => {
-                if let Some(lock) = &mut self.lock {
-                    let drag = ((x - from) / run).clamp(0.0, 1.0);
-                    if (drag - lock.drag).abs() > 0.005 {
-                        lock.drag = drag;
+            Touch::Down(x, _) => {
+                self.lock_from = Some(x);
+                if self.state.lock_pull != 0.0 {
+                    self.state.lock_pull = 0.0;
+                    self.refresh();
+                }
+            }
+            Touch::Move(x, _) => {
+                if let Some(from) = self.lock_from {
+                    let pull = ((x - from) / reach).clamp(0.0, 1.0);
+                    if (pull - self.state.lock_pull).abs() > 0.005 {
+                        self.state.lock_pull = pull;
                         self.refresh();
                     }
                 }
             }
             Touch::Up => {
-                let went = self.lock.is_some_and(|l| l.drag >= LOCK_PULL);
+                let went = self.state.lock_pull >= LOCK_PULL;
+                self.lock_from = None;
+                self.state.lock_pull = 0.0;
                 if went {
-                    self.lock = None;
-                } else if let Some(lock) = &mut self.lock {
-                    lock.drag = 0.0;
+                    self.state.locked = false;
                 }
                 self.refresh();
             }
         }
         Vec::new()
-    }
-
-    /// Where the lock's knob slides: the bar drawn along the foot of the
-    /// screen, as the other swipe-to-confirm controls are.
-    pub fn lock_track(&self) -> Rect {
-        let t = self.theme();
-        let m = &t.m;
-        let inset = m.margin + m.dp(14.0);
-        Rect::new(inset, m.h as f32 - m.dp(150.0), m.w as f32 - inset * 2.0, m.dp(56.0))
     }
 
     pub fn touch(&mut self, ev: Touch, f: &Fonts, now: u64) -> Vec<Effect> {
@@ -6985,16 +6587,9 @@ impl App {
             }
             return Vec::new();
         }
-        // The lock takes every touch until its knob is slid home.
-        if self.lock.is_some() {
+        // The lock screen takes every touch until its knob is slid home.
+        if self.state.locked {
             return self.slide_lock(ev, now);
-        }
-        // The control centre takes every finger while it is over the page or
-        // being pulled out, and one that comes down from the top edge starts
-        // that pull.
-        let pulling = matches!(self.drag, Drag::Shade { .. });
-        if self.shade > 0.0 || pulling || matches!(ev, Touch::Down(_, y) if y <= self.theme().m.dp(40.0)) {
-            return self.shade_touch(ev, now);
         }
         // A finger on the charging screen sends it away for the page, and
         // does nothing else until it lifts.
@@ -7186,8 +6781,6 @@ impl App {
                 }
                 Drag::Waking => self.drag = Drag::Waking,
                 Drag::Held => self.drag = Drag::Held,
-                // The control centre's own fingers are taken before this.
-                Drag::Shade { .. } => {}
                 Drag::Idle => {}
             },
             Touch::Up => match std::mem::replace(&mut self.drag, Drag::Idle) {
@@ -10935,7 +10528,7 @@ mod tests {
     }
 
     #[test]
-    fn the_dark_panel_lights_on_a_double_tap_and_the_lock_lets_it_go() {
+    fn the_dark_panel_lights_on_a_double_tap_and_the_lock_screen_lets_it_go() {
         let (f, _i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
         app.sleep(1000, true);
@@ -10944,74 +10537,18 @@ mod tests {
         assert!(!app.display_on(), "one tap lights nothing");
         app.touch(Touch::Down(140.0, 320.0), &f, 1200);
         assert!(app.display_on(), "two taps close together light it");
-        assert!(app.lock.is_some(), "and it comes on with the lock over the page");
-        assert_eq!(app.screen(), Screen::Home, "the page under the lock is the one it was");
-        // A knob not slid home leaves the lock up.
-        let track = app.lock_track();
-        app.touch(Touch::Down(track.x + 10.0, track.y + 10.0), &f, 2000);
-        app.touch(Touch::Move(track.x + 60.0, track.y + 10.0), &f, 2020);
+        assert_eq!(app.screen(), Screen::Home, "the page under the lock screen is still the one it was");
+        assert!(app.state.locked, "and it comes on with the lock screen");
+        // A touch that is not slid home leaves the lock screen up.
+        app.touch(Touch::Down(100.0, 900.0), &f, 2000);
+        app.touch(Touch::Move(120.0, 900.0), &f, 2020);
         app.touch(Touch::Up, &f, 2040);
-        assert!(app.lock.is_some(), "a short slide lets nothing go");
+        assert!(app.state.locked, "a short slide lets nothing go");
         // Slid home, the page under it is used again.
-        app.touch(Touch::Down(track.x + 5.0, track.y + 10.0), &f, 3000);
-        app.touch(Touch::Move(track.x + track.w - 5.0, track.y + 10.0), &f, 3050);
+        app.touch(Touch::Down(100.0, 900.0), &f, 3000);
+        app.touch(Touch::Move(100.0 + W as f32 * 0.55, 900.0), &f, 3050);
         app.touch(Touch::Up, &f, 3100);
-        assert!(app.lock.is_none(), "slid home, the lock is gone");
-    }
-
-    #[test]
-    fn a_pull_from_the_top_edge_brings_the_control_centre_down() {
-        let (f, _i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
-        app.touch(Touch::Down(700.0, 20.0), &f, 0);
-        app.touch(Touch::Move(700.0, 600.0), &f, 100);
-        app.touch(Touch::Up, &f, 120);
-        app.tick(4000);
-        assert!(app.shade > 0.99, "let go past the keep, the sheet stays open: {}", app.shade);
-        assert_eq!(app.screen(), Screen::Home, "the page under the sheet is not worked");
-        // Dragged back up, it shuts again.
-        app.touch(Touch::Down(700.0, 900.0), &f, 5000);
-        app.touch(Touch::Move(700.0, 700.0), &f, 5020);
-        app.touch(Touch::Up, &f, 5040);
-        app.tick(9000);
-        assert_eq!(app.shade, 0.0, "dragged up, it shuts again");
-    }
-
-    #[test]
-    fn the_control_centres_tiles_work_what_they_say() {
-        let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
-        app.state.wlan = Some(Wlan::default());
-        let mut c = Canvas::new(W, H);
-        app.shade = 1.0;
-        app.compose(&mut c, &f, &i, "12:00", 0);
-        let tile = |app: &App, which: ShadeHit| app.shade_hits.iter().find(|(_, h)| *h == which).expect("the sheet's tile").0;
-        let (x, y) = tile(&app, ShadeHit::Wlan).centre();
-        assert!(app.touch(Touch::Down(x, y), &f, 100).is_empty());
-        assert_eq!(app.touch(Touch::Up, &f, 120), vec![Effect::Wlan(true)], "the WLAN tile turns the WLAN on");
-        assert_eq!(app.shade, 1.0, "a tile that turns nothing on leaves the sheet up");
-        // The sheet's own brightness slider sets the backlight, at once.
-        let track = tile(&app, ShadeHit::Brightness);
-        app.touch(Touch::Down(track.x + 10.0, track.y + 3.0), &f, 200);
-        app.touch(Touch::Move(track.x + track.w * 0.8, track.y + 3.0), &f, 240);
-        app.touch(Touch::Up, &f, 260);
-        assert!((app.state.brightness - 0.8).abs() < 0.02, "the brightness follows the finger: {}", app.state.brightness);
-        assert_eq!(app.shade, 1.0, "working a slider does not shut the sheet");
-    }
-
-    #[test]
-    fn a_screenshot_from_the_control_centre_is_taken_after_the_sheet_goes() {
-        let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
-        let mut c = Canvas::new(W, H);
-        app.shade = 1.0;
-        app.compose(&mut c, &f, &i, "12:00", 0);
-        let (x, y) = app.shade_hits.iter().find(|(_, h)| *h == ShadeHit::Screenshot).expect("a screenshot tile").0.centre();
-        app.touch(Touch::Down(x, y), &f, 100);
-        assert!(app.touch(Touch::Up, &f, 120).is_empty(), "the shot waits for the sheet to go");
-        assert_eq!(app.shade, 0.0, "the sheet goes first");
-        assert!(app.tick(120 + SHOT_AFTER_MS - 1).is_empty(), "the page under it is drawn before the shot");
-        assert_eq!(app.tick(120 + SHOT_AFTER_MS), vec![Effect::Screenshot { storage: false }], "then the page is saved");
+        assert!(!app.state.locked, "slid home, the page under it is used again");
     }
 
     #[test]
