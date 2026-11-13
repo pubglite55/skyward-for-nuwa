@@ -76,7 +76,7 @@ pub const ENTRIES: &[Entry] = &[
         ["无线传输", "無線傳輸", "Wireless transfer"],
         SETTINGS,
         Screen::Wireless,
-        &["wuxianchuanshu", "wxcs", "wireless", "wifi", "wlan", "http", "web"],
+        &["wuxianchuanshu", "wxcs", "wireless", "http", "web"],
     ),
     entry(["语言", "語言", "Language"], SETTINGS, Screen::Language, &["yuyan", "yy", "language", "fanti", "jianti", "english"]),
     entry(["时区", "時區", "Time zone"], SETTINGS, Screen::TimeZone, &["shiqu", "sq", "timezone"]),
