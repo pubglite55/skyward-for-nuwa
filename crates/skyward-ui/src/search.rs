@@ -82,7 +82,7 @@ pub const ENTRIES: &[Entry] = &[
         ["网络下载", "網路下載", "Download by link"],
         SETTINGS,
         Screen::Fetch,
-        &["wangluoxiazai", "wlxz", "wangzhi", "wz", "download", "url", "lianjie"],
+        &["wangluowangzhi", "lianjie", "download", "url", "https"],
     ),
     entry(["语言", "語言", "Language"], SETTINGS, Screen::Language, &["yuyan", "yy", "language", "fanti", "jianti", "english"]),
     entry(["时区", "時區", "Time zone"], SETTINGS, Screen::TimeZone, &["shiqu", "sq", "timezone"]),
