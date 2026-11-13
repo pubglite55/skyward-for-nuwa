@@ -1,10 +1,8 @@
-//! A picture a page shows, as the browser draws it: PNG read into straight
-//! RGBA, and put on a canvas at whatever width the page gives it.
+//! A picture a page shows, as the browser draws it: PNG or JPEG read into
+//! straight RGBA, and put on a canvas at whatever width the page gives it.
 //!
-//! Only PNG is read: it is the one format the recovery already carries a
-//! reader for, and a page's pictures are taken only where a browser here can
-//! show them. A picture too big to keep is not shown at all, and the page
-//! says so by leaving it out.
+//! A picture of another kind is left out, and so is one too big to keep: the
+//! page says so by showing nothing where it was.
 
 use crate::canvas::Canvas;
 use crate::color::Rgba;
@@ -21,9 +19,21 @@ pub struct Picture {
 /// pictures and still have room for the page.
 const MOST_PIXELS: u32 = 2_000_000;
 
+/// Read `bytes` as a picture, PNG or JPEG; none where it is neither, or is
+/// more than the recovery keeps.
+pub fn read(bytes: &[u8]) -> Option<Picture> {
+    if bytes.starts_with(b"PNG") {
+        read_png(bytes)
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        read_jpeg(bytes)
+    } else {
+        None
+    }
+}
+
 /// Read `bytes` as a PNG picture; none where it is not one, or is more than
 /// the recovery keeps.
-pub fn read_png(bytes: &[u8]) -> Option<Picture> {
+fn read_png(bytes: &[u8]) -> Option<Picture> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     // A palette is turned into colours and a bit depth under eight into
     // eight, so that every picture comes out as rows of four bytes.
@@ -63,6 +73,43 @@ pub fn read_png(bytes: &[u8]) -> Option<Picture> {
         return None;
     }
     Some(Picture { w, h, rgba })
+}
+
+/// Read `bytes` as a JPEG picture; none where it is not one, or is more than
+/// the recovery keeps. A JPEG of sixteen bits a channel is left out, as the
+/// pages that show one are rare and its pixels are not bytes.
+fn read_jpeg(bytes: &[u8]) -> Option<Picture> {
+    let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(bytes));
+    let pixels = decoder.decode().ok()?;
+    let info = decoder.info()?;
+    let (w, h) = (info.width as u32, info.height as u32);
+    if w == 0 || h == 0 || w.saturating_mul(h) > MOST_PIXELS {
+        return None;
+    }
+    let mut rgba = Vec::with_capacity((w as usize) * (h as usize) * 4);
+    match info.pixel_format {
+        jpeg_decoder::PixelFormat::RGB24 => {
+            for px in pixels.as_chunks::<3>().0 {
+                rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
+            }
+        }
+        jpeg_decoder::PixelFormat::L8 => {
+            for &g in &pixels {
+                rgba.extend_from_slice(&[g, g, g, 255]);
+            }
+        }
+        // A page's picture is shown, not printed: the ink is turned back into
+        // colours the quick way.
+        jpeg_decoder::PixelFormat::CMYK32 => {
+            for px in pixels.as_chunks::<4>().0 {
+                let ink = 255 - px[3] as u32;
+                let turn = |v: u8| ((255 - v as u32) * ink / 255) as u8;
+                rgba.extend_from_slice(&[turn(px[0]), turn(px[1]), turn(px[2]), 255]);
+            }
+        }
+        jpeg_decoder::PixelFormat::L16 => return None,
+    }
+    (rgba.len() == (w as usize) * (h as usize) * 4).then_some(Picture { w, h, rgba })
 }
 
 /// Draw `picture` with its top-left corner at (`x`, `y`), as wide as `w` and
@@ -109,7 +156,7 @@ mod tests {
 
     #[test]
     fn a_png_comes_out_as_its_pixels() {
-        let picture = read_png(&sample()).expect("a picture");
+        let picture = read(&sample()).expect("a picture");
         assert_eq!((picture.w, picture.h), (2, 2));
         assert_eq!(&picture.rgba[0..4], &[255, 0, 0, 255]);
         assert_eq!(&picture.rgba[4..8], &[0, 255, 0, 255]);
@@ -117,13 +164,14 @@ mod tests {
     }
 
     #[test]
-    fn what_is_not_a_png_is_no_picture() {
-        assert!(read_png(b"not a picture at all").is_none());
+    fn what_is_neither_png_nor_jpeg_is_no_picture() {
+        assert!(read(b"not a picture at all").is_none());
+        assert!(read(b"PNG but cut short").is_none());
     }
 
     #[test]
     fn a_picture_is_put_where_the_page_gives_it_room() {
-        let picture = read_png(&sample()).unwrap();
+        let picture = read(&sample()).unwrap();
         let mut c = Canvas::filled(8, 8, Rgba::rgb(255, 255, 255));
         draw(&mut c, &picture, 2.0, 2.0, 4.0, 4.0);
         let at = |x: usize, y: usize| {

@@ -18,6 +18,9 @@ png = "0.17.16"
 # here rather than taken from the network, as the recovery carries no library
 # for it and the code has to be drawn offline.
 qrcodegen = { path = "../../vendor/qrcodegen" }
+# A page's pictures are mostly JPEG, and PNG alone leaves most pages bare.
+# Threads are left out: the picture is decoded where it is drawn.
+jpeg-decoder = { version = "0.3.1", default-features = false }
 # The settings are kept between starts as a JSON file.
 serde = { workspace = true }
 serde_json = "1.0.154"

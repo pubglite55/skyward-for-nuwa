@@ -4,8 +4,8 @@
 //! The address is only ever http or https, and only what a page says in its
 //! markup is kept: the pictures it shows are taken too, as many as a recovery
 //! can hold, and nothing a script would draw is run. What comes back is
-//! either the page, as [`skyward_net::html`] reads it, with the PNG pictures
-//! it shows, or the name of a file the address holds, which the browser takes
+//! either the page, as [`skyward_net::html`] reads it, with the pictures it
+//! shows, or the name of a file the address holds, which the browser takes
 //! into the folder it saves to.
 
 use anyhow::{Context, Result};
@@ -37,7 +37,7 @@ const MOST_PICTURE: u64 = 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Read {
     /// A page, as its markup says it, with the pictures it shows that this
-    /// recovery can read: each by the address it is at, and its PNG.
+    /// recovery can read: each by the address it is at, and its bytes.
     Page { page: Page, pictures: Vec<(String, Vec<u8>)> },
     /// A file the address holds, which is taken into the folder the browser
     /// saves to, under this name.
@@ -124,8 +124,8 @@ fn fetch(url: &str, servers: http::Servers) -> Result<Read, String> {
     Ok(Read::Page { page, pictures })
 }
 
-/// The PNG at `to`, where it is one and is no bigger than is kept: a picture
-/// of another kind is left out, as it cannot be drawn here.
+/// The picture at `to`, where it is a PNG or a JPEG and is no bigger than is
+/// kept: one of another kind is left out, as it cannot be drawn here.
 fn picture(agent: &ureq::Agent, to: &str) -> Option<Vec<u8>> {
     let mut answer = agent
         .get(to)
@@ -143,7 +143,7 @@ fn picture(agent: &ureq::Agent, to: &str) -> Option<Vec<u8>> {
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !kind.starts_with("image/png") {
+    if !(kind.starts_with("image/png") || kind.starts_with("image/jpeg")) {
         return None;
     }
     let mut body = Vec::new();

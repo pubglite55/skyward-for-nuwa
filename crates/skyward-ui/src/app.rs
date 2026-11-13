@@ -5266,7 +5266,7 @@ impl App {
     /// A picture of the page shown has come: it is kept to be drawn, if it
     /// is one this recovery can read, and the page is drawn again.
     pub fn pictured(&mut self, at: String, png: &[u8]) {
-        if let Some(picture) = crate::picture::read_png(png) {
+        if let Some(picture) = crate::picture::read(png) {
             self.state.browser.images.insert(at, picture);
             if self.screen() == Screen::Browser {
                 self.refresh();
