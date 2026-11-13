@@ -33,7 +33,16 @@ This repository carries Skyward to one phone: the **Xiaomi 13 Pro**
 - **Mounts** the slot's partitions, and switches slots.
 - **Files and a terminal**: a file manager, a shell, and the kernel log.
 - **Hands storage to a computer** over MTP, and speaks adb and fastbootd.
-- **WLAN**, for updates straight from the network.
+- **WLAN**, joining the network kept at the next start by itself, for updates
+  straight from the network.
+- **A lock screen and a control centre**: slide to unlock, two taps to light a
+  dark panel; pulled from the top edge, the centre holds WLAN, a screenshot,
+  reboot and screen off, with sliders for the backlight and the motor.
+- **Wireless transfer**: a browser on the same network opens
+  `http://<phone>:8080/` to list, download and drop files onto the phone.
+- **Downloads from an address**: straight into `Download/`, resumed when
+  stopped; a code on the page (8081) takes an address typed on another phone,
+  and `link.txt` takes one a computer left.
 - **Two systems** on one phone, from the Dual boot page.
 - **Updates itself** from its own releases.
 - Light and dark themes; Simplified Chinese, Traditional Chinese and English.
@@ -44,6 +53,7 @@ This repository carries Skyward to one phone: the **Xiaomi 13 Pro**
 | Opening the data partition | verified (keys made by Android 17, phone on 16) |
 | adb | verified |
 | Installing, MTP, fastbootd, WLAN, backup and restore, Dual boot, online updates | inherited from 0.2.0, not yet exercised here |
+| The control centre, the lock screen, the kept WLAN, the code on the download page | built and unit-tested; the look is still to be seen on the phone |
 
 ## Getting it onto the phone
 
@@ -80,6 +90,8 @@ working; flashing the stock recovery back is all it takes to return to it.
 | Mount | The slot's partitions, mounted, unmounted, formatted, repaired |
 | Wipe | Data, cache, and the phone's own logs |
 | Dual boot | A second system in the data partition, installed, switched to, removed |
+| Wireless | Internal storage handed to a browser on the same network: list, download, upload |
+| Download | An address taken into `Download/`, resumed when stopped; a code or `link.txt` brings one |
 | Tools | A terminal, the kernel log, and the recovery's own log |
 | Settings | Theme, language, time zone, screen-off time, vibration, file transfer |
 | Reboot | System, recovery, fastboot, bootloader, EDL, and the slot to boot |

@@ -4,8 +4,8 @@
 
 - 仓库：https://github.com/pubglite55/skyward-for-nuwa
 - 上游：https://github.com/kirklin/skyward（本仓库基于 **0.2.0**）
-- 当前最新 Release：**nuwa-v1.5**（2026-11-12 重建，含自更新修复）；v1.6 待真机验证后打 tag
-- 当前发布分支 `fork/main` 头：随本轮合并推进（控制中心/WLAN 记忆/备份跳过/下载页二维码）；本地工作分支 `upstream-merge`、`shade`
+- 当前最新 Release：**nuwa-v1.7**（2026-11-13，控制中心 / WLAN 记忆 / 备份跳过 / 下载页二维码；开机进首页、data 按需打开）
+- 当前发布分支 `fork/main` 头：与本轮发布同一提交；本地工作分支 `upstream-merge`
 - 设备：小米 13 Pro，代号 **nuwa**，型号 2210132C，SM8550（骁龙 8 Gen 2）
 
 ---
@@ -303,6 +303,7 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 
 | 文件 | 改了什么 |
 | --- | --- |
+| `crates/skyward/src/ui.rs` | **开机进首页**：删去 `first == Home → Decrypt` 的映射，解密页与其他页面一样从首页进入；data 仍按需打开（进解密页/文件/OTA）。发布说明与两份 README 同步重写 |
 | `crates/skyward-ui/src/app.rs`、`crates/skyward/src/ui.rs` | **下拉控制中心**：顶边 40dp 内下拉（`SHADE_PULL_DP`=110dp 算全开，松手按位置+速度走 1.8s smoothstep 收放），面板四块：WLAN（已开/已关，点了直接开关）、截图、重启（开重启页）、熄屏（锁屏待双击）；亮度/振动两条滑条即时生效（亮度走 `state.brightness`，即背光）。截图在面板收起后 130ms 取，避免把面板拍进照片。锁屏加日期（`App::set_date`，ui 每分钟跟时钟一起刷新），时间/电量按截图排在上三分之一 |
 | `crates/skyward-ui/src/pages.rs` | 解密页：锁图标外套一圈进度环（`stroke_arc`），副标题按步骤换文案（打开分区 → 导入共享密钥 → 读取用户密钥 → 登记系统服务）；进度条加宽到 200dp |
 | `crates/skyward/src/wlanmem.rs`（新）、`skyward-ui`（`settings`/`app`/`pages`）、`crates/skyward/src/ui.rs` | **WLAN 自动连接 / 记住密码**（两开关在 WLAN 页）：自动连接=开机即开 WLAN 并在扫描到后连上次的网络；记住密码=连接成功后把 SSID（十六进制）与密码写 `/metadata/skyward/wlan`（0600，原子 rename）。密码被拒（`WrongPassword`）自动删除；手动断开不会被暗中重连；关掉开关即删除 |
