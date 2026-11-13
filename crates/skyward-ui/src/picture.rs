@@ -22,7 +22,7 @@ const MOST_PIXELS: u32 = 2_000_000;
 /// Read `bytes` as a picture, PNG or JPEG; none where it is neither, or is
 /// more than the recovery keeps.
 pub fn read(bytes: &[u8]) -> Option<Picture> {
-    if bytes.starts_with(b"PNG") {
+    if bytes.starts_with(b"\x89PNG") {
         read_png(bytes)
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
         read_jpeg(bytes)
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn what_is_neither_png_nor_jpeg_is_no_picture() {
         assert!(read(b"not a picture at all").is_none());
-        assert!(read(b"PNG but cut short").is_none());
+        assert!(read(b"\x89PNG but cut short").is_none());
     }
 
     #[test]
