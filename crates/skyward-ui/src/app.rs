@@ -3444,12 +3444,34 @@ impl App {
     }
 
     pub fn data_waiting(&mut self, waiting: Option<(u32, Keys)>) {
+        let open = waiting.is_none();
         self.state.data = match waiting {
             Some((user, keys)) => Data::Locked { user, keys, checking: false },
             None => Data::Open,
         };
         self.state.code.clear();
+        // With nothing more to ask, the page that asked for the partition is
+        // left at once: the file manager it was opened from is where the
+        // files are, and the page has said all it has to say.
+        if open {
+            self.leave_decrypt();
+        }
         self.refresh();
+    }
+
+    /// Leave the decrypt page, back to where it was opened from, or to the
+    /// home page where the recovery started on it.
+    fn leave_decrypt(&mut self) {
+        if self.screen() != Screen::Decrypt {
+            return;
+        }
+        self.leave(true);
+        if self.stack.len() > 1 {
+            self.stack.pop();
+        } else {
+            *self.top_mut() = (Screen::Home, 0.0, Focus::Unset);
+        }
+        self.settle_page();
     }
 
     /// The data partition did not open, and why.
@@ -10167,6 +10189,17 @@ mod tests {
         first.arrive();
         tap(&mut first, &f, &i, Action::Skip);
         assert_eq!((first.screen(), first.stack.len()), (Screen::Home, 1), "a recovery that started on the page goes on to the home page");
+    }
+
+    #[test]
+    fn the_decrypt_page_is_left_once_nothing_is_asked_of_it() {
+        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        app.arrive();
+        app.data_waiting(Some((0, Keys::Digits)));
+        assert_eq!(app.screen(), Screen::Decrypt, "the page stays while the screen lock is asked for");
+        app.data_waiting(None);
+        assert_eq!(app.screen(), Screen::Home, "with nothing more to ask it goes on to the page behind it");
+        assert_eq!(app.stack.len(), 1, "and that page is alone behind it");
     }
 
     #[test]

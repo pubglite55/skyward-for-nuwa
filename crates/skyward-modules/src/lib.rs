@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 pub mod modprobe;
 
@@ -19,10 +20,32 @@ pub fn source_dir(source: &str) -> Result<PathBuf> {
     }))
 }
 
+/// The modules this run of the recovery has handed to the kernel. A module
+/// two of them share — the same driver asked for by the WLAN and by the
+/// mounts — is handed over once: the kernel refuses the second hand, and the
+/// graph in each folder lists its dependencies again.
+static HANDED_OVER: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
+
+fn handed_over() -> &'static Mutex<BTreeSet<String>> {
+    HANDED_OVER.get_or_init(Mutex::default)
+}
+
+/// Whether this run has not handed `module` to the kernel yet, and the claim
+/// taken if it has not.
+fn claim(module: &str) -> bool {
+    handed_over().lock().unwrap_or_else(|e| e.into_inner()).insert(module.to_string())
+}
+
+/// Give a claim back, for a module the kernel did not take after all.
+fn unclaim(module: &str) {
+    handed_over().lock().unwrap_or_else(|e| e.into_inner()).remove(module);
+}
+
 /// Load `names` (module names without `.ko`) with their dependencies. Each
 /// comes from the first of `dirs` that holds it, and its dependencies from
 /// that directory's modules.dep; a module the kernel already has counts as
-/// loaded. Returns the files loaded, dependencies first.
+/// loaded, and so does one this run has already handed over. Returns the
+/// files loaded, dependencies first.
 pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
     let mut loaded = Vec::new();
     for name in names {
@@ -33,10 +56,19 @@ pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
             .ok_or_else(|| anyhow!("{file} is in none of {dirs:?}"))?;
         let graph = parse_dep(dir)?;
         for m in graph.load_order(std::slice::from_ref(&file)) {
-            let path = graph
-                .resolve_path(&m)
-                .ok_or_else(|| anyhow!("{m} is listed in {}/modules.dep but missing", dir.display()))?;
-            insmod(&path, "")?;
+            // A dependency another request has already had loaded is not
+            // handed over again.
+            if !claim(&m) {
+                continue;
+            }
+            let Some(path) = graph.resolve_path(&m) else {
+                unclaim(&m);
+                bail!("{m} is listed in {}/modules.dep but missing", dir.display());
+            };
+            if let Err(e) = insmod(&path, "") {
+                unclaim(&m);
+                return Err(e);
+            }
             loaded.push(path);
         }
     }
@@ -181,5 +213,14 @@ mod tests {
     #[test]
     fn strips_paths_to_basenames() {
         assert_eq!(basename("kernel/drivers/foo/bar.ko"), "bar.ko");
+    }
+
+    #[test]
+    fn a_module_is_handed_over_once_a_run() {
+        assert!(claim("shared.ko"), "the first request takes it");
+        assert!(!claim("shared.ko"), "the second is told it was taken, and leaves it");
+        unclaim("shared.ko");
+        assert!(claim("shared.ko"), "a module the kernel did not take is claimed again");
+        unclaim("shared.ko");
     }
 }
