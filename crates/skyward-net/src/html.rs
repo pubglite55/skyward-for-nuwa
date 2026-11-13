@@ -33,7 +33,8 @@ const MOST_WORDS: usize = 200_000;
 /// Read `markup` as a page, its links made whole against `base`, the
 /// address it was read from.
 pub fn parse(markup: &str, base: &str) -> Page {
-    let mut built = Built { base, title: String::new(), blocks: Vec::new(), words: String::new(), link: None, heading: false, words_kept: 0 };
+    let mut built =
+        Built { base, title: String::new(), blocks: Vec::new(), words: String::new(), link: None, heading: false, broken: false, words_kept: 0 };
     built.run(markup);
     built.flush();
     let mut page = Page { title: built.title.trim().to_string(), blocks: built.blocks };
@@ -60,6 +61,9 @@ struct Built<'a> {
     /// The address the words lead to, while they are a link's.
     link: Option<String>,
     heading: bool,
+    /// A block of the page ended since the words gathered last: what comes
+    /// next starts a block of its own.
+    broken: bool,
     words_kept: usize,
 }
 
@@ -114,13 +118,18 @@ impl Built<'_> {
                 "h1" | "h2" | "h3" | "h4" | "h5" | "h6" if !closing => {
                     self.flush();
                     self.heading = true;
+                    self.broken = true;
                 }
                 "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                     self.flush();
                     self.heading = false;
+                    self.broken = true;
                 }
                 "p" | "div" | "br" | "li" | "ul" | "ol" | "tr" | "td" | "th" | "table" | "section" | "article" | "header"
-                | "footer" | "blockquote" | "pre" | "hr" | "dd" | "dt" => self.flush(),
+                | "footer" | "blockquote" | "pre" | "hr" | "dd" | "dt" => {
+                    self.flush();
+                    self.broken = true;
+                }
                 _ => {}
             }
         }
@@ -143,16 +152,34 @@ impl Built<'_> {
         self.words.push_str(&words);
     }
 
-    /// The words gathered so far, as the block they make.
+    /// The words gathered so far, as the block they make: words that follow
+    /// words without a block of the page between them join them, as a
+    /// sentence broken by a link with nowhere to go is one sentence.
     fn flush(&mut self) {
         let words = self.words.trim().to_string();
         self.words.clear();
+        let broken = std::mem::replace(&mut self.broken, false);
         if words.is_empty() {
             self.link = None;
             return;
         }
         if self.blocks.len() >= MOST_BLOCKS {
             return;
+        }
+        if let (None, false) = (&self.link, broken) {
+            if let Some(Block::Words(last)) = self.blocks.last_mut() {
+                // A space goes between two Latin words; a Chinese sentence
+                // broken by a link with nowhere to go is joined as it was.
+                let latin = |text: &str, last: bool| {
+                    let at = if last { text.chars().last() } else { text.chars().next() };
+                    at.is_some_and(|c| c.is_ascii_alphanumeric())
+                };
+                if latin(last, true) && latin(&words, false) {
+                    last.push(' ');
+                }
+                last.push_str(&words);
+                return;
+            }
         }
         match (self.link.take(), self.heading) {
             (Some(to), _) => self.blocks.push(Block::Link { words, to }),
