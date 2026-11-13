@@ -981,7 +981,7 @@ fn addressed(typed: &str) -> Option<String> {
     if lower.starts_with("http://") || lower.starts_with("https://") {
         return Some(typed.to_string());
     }
-    if typed.chars().all(|c| c.is_ascii()) && !typed.contains(char::is_whitespace) && looks_like_host(typed) {
+    if typed.is_ascii() && !typed.contains(char::is_whitespace) && looks_like_host(typed) {
         return Some(format!("https://{typed}"));
     }
     Some(format!("https://cn.bing.com/search?q={}", quoted(typed)))

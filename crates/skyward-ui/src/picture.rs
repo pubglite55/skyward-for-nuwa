@@ -41,7 +41,7 @@ pub fn read_png(bytes: &[u8]) -> Option<Picture> {
         match frame.color_type {
             png::ColorType::Rgba => rgba.extend_from_slice(&row[..(w as usize) * 4]),
             png::ColorType::Rgb => {
-                for px in row[..(w as usize) * 3].chunks_exact(3) {
+                for px in row[..(w as usize) * 3].as_chunks::<3>().0 {
                     rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
                 }
             }
@@ -51,7 +51,7 @@ pub fn read_png(bytes: &[u8]) -> Option<Picture> {
                 }
             }
             png::ColorType::GrayscaleAlpha => {
-                for px in row[..(w as usize) * 2].chunks_exact(2) {
+                for px in row[..(w as usize) * 2].as_chunks::<2>().0 {
                     rgba.extend_from_slice(&[px[0], px[0], px[0], px[1]]);
                 }
             }
@@ -94,14 +94,16 @@ mod tests {
     /// A 2x2 PNG: red, green, blue, and a pixel half transparent.
     fn sample() -> Vec<u8> {
         let mut out = Vec::new();
-        let mut encoder = png::Encoder::new(&mut out, 2, 2);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        writer
-            .write_image_data(&[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 128])
-            .unwrap();
-        writer.finish().unwrap();
+        {
+            let mut encoder = png::Encoder::new(&mut out, 2, 2);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 128])
+                .unwrap();
+            writer.finish().unwrap();
+        }
         out
     }
 
