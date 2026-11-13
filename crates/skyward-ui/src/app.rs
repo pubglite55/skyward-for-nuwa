@@ -8344,9 +8344,9 @@ mod tests {
     }
 
     #[test]
-    fn the_network_row_opens_the_wireless_page() {
+    fn the_advanced_page_opens_the_wireless_page() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = App::new(Screen::Advanced, W, H, PPD);
         let (_, y) = spot(&mut app, &f, &i, Action::Open(Screen::Wireless));
         if y > H as f32 * 0.9 {
             scroll_to(&mut app, &f, y - H as f32 * 0.8, 0);

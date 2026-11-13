@@ -387,14 +387,6 @@ pub fn settings(cx: &Ctx) -> Frame {
         "When on, a computer can manage the files in internal storage, once it is decrypted.",
     ]);
     y = widgets::footnote(&mut c, t, f, usb.bottom, note);
-    y = widgets::section(&mut c, t, f, y, l.pick(["网络", "網路", "Network"]));
-    let wireless_state = if s.wireless { l.pick(["开", "開", "On"]) } else { l.pick(["关", "關", "Off"]) };
-    let network = widgets::list(&mut c, t, f, y, &[
-        Row::new(l.pick(WIRELESS)).icon(GREEN, Icon::Wlan).trail(Trail::Value(wireless_state)),
-        Row::new(l.pick(FETCH)).icon(BLUE, Icon::Globe),
-    ]);
-    out.extend(hits(&network.rows, &[Action::Open(Screen::Wireless), Action::Open(Screen::Fetch)]));
-    y = network.bottom;
     y = widgets::section(&mut c, t, f, y, l.pick(["调试", "偵錯", "Debugging"]));
     let debug = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal)]);
     out.extend(hits(&debug.rows, &[Action::Open(Screen::Terminal)]));
@@ -2213,9 +2205,10 @@ const STOP: Text = ["停止", "停止", "Stop"];
 
 /// Tools for the experienced.
 pub fn advanced(cx: &Ctx) -> Frame {
-    let (t, f, l) = (cx.t, cx.f, cx.state.lang);
-    let mut c = page(cx);
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
     let top = t.m.content_top;
+    let wireless = if s.wireless { l.pick(["开", "開", "On"]) } else { l.pick(["关", "關", "Off"]) };
     let tools = widgets::list(&mut c, t, f, top, &[
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
@@ -2223,6 +2216,8 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
         Row::new(l.pick(LOGS)).icon(ORANGE, Icon::Log),
         Row::new(l.pick(UPDATE)).icon(GREEN, Icon::Layers).trail(Trail::Value(update_value(cx))),
+        Row::new(l.pick(WIRELESS)).icon(GREEN, Icon::Wlan).trail(Trail::Value(wireless)),
+        Row::new(l.pick(FETCH)).icon(BLUE, Icon::Globe),
     ]);
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
@@ -2231,8 +2226,10 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Filesystems),
         Action::Open(Screen::Logs),
         Action::Open(Screen::Update),
+        Action::Open(Screen::Wireless),
+        Action::Open(Screen::Fetch),
     ]);
-    Frame::new(t, c, out, l.pick(ADVANCED), top)
+    Frame::new(t, fit(c, t, tools.bottom), out, l.pick(ADVANCED), top)
 }
 
 const RELABEL: Text = ["修复 SELinux 上下文", "修復 SELinux 上下文", "Fix SELinux contexts"];

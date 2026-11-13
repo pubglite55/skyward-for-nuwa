@@ -74,13 +74,13 @@ pub const ENTRIES: &[Entry] = &[
     entry(["文件传输", "檔案傳輸", "File transfer"], SETTINGS, Screen::Settings, &["wenjianchuanshu", "wjcs", "chuanshu", "mtp", "usb"]),
     entry(
         ["无线传输", "無線傳輸", "Wireless transfer"],
-        SETTINGS,
+        ADVANCED,
         Screen::Wireless,
         &["wuxianchuanshu", "wxcs", "wireless", "http", "web"],
     ),
     entry(
         ["网络下载", "網路下載", "Download by link"],
-        SETTINGS,
+        ADVANCED,
         Screen::Fetch,
         &["wangluowangzhi", "lianjie", "download", "url", "https"],
     ),
