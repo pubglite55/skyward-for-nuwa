@@ -4,8 +4,8 @@
 
 - 仓库：https://github.com/pubglite55/skyward-for-nuwa
 - 上游：https://github.com/kirklin/skyward（本仓库基于 **0.2.0**）
-- 当前最新 Release：**nuwa-v1.5**（2026-11-12 重建，含自更新修复）
-- 当前发布分支 `fork/main` 头：`dfe8f4e`（2026-11-12 交接文档那次提交；本地工作分支 `upstream-merge` 与之完全一致）
+- 当前最新 Release：**nuwa-v1.5**（2026-11-12 重建，含自更新修复）；v1.6 待真机验证后打 tag
+- 当前发布分支 `fork/main` 头：随本轮合并推进（控制中心/WLAN 记忆/备份跳过/下载页二维码）；本地工作分支 `upstream-merge`、`shade`
 - 设备：小米 13 Pro，代号 **nuwa**，型号 2210132C，SM8550（骁龙 8 Gen 2）
 
 ---
@@ -298,6 +298,16 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-modules`、`crates/skyward-ui`、`crates/skyward-preview` | 内核模块按「本次启动已交给内核」去重：同一 `.ko` 被两个请求（或同一请求的两条依赖链）共享时只 insmod 一次，此前会被重复交给内核并触发 `EEXIST`；解密页在分区打开且没有用户仍需解锁时**自行返回**（回到打开它的页面），不再需要手动跳过 |
 | `crates/skyward-ui`（`app`/`settings`/`pages`/`search`） | 文件管理器排序：高级 → 文件排序，可按名称 / 大小 / 修改时间，升降序，文件夹置顶；排序在界面侧完成，改选即重排已打开的列表，选择写入设置文件（`sort`），下次启动保留 |
 | `crates/skyward-net/src/download.rs`、`crates/skyward/src/updates.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「网络下载」：高级 → 网络下载，输入 `http://` / `https://` 直链，按回车即下到内部存储 `Download/`；支持 `Range` 续传、可停止（已下部分保留，再下同一地址接着下）、同名文件自动加序号不覆盖。为此给下载层加了「无摘要」模式（`Sum::None`，手输地址不带校验值）与文件名推导（`name_from` / `free_name`） |
+
+### 2026-11-13 · 对齐 pudding 截图（控制中心、锁屏、解密页、下载页）
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `crates/skyward-ui/src/app.rs`、`crates/skyward/src/ui.rs` | **下拉控制中心**：顶边 40dp 内下拉（`SHADE_PULL_DP`=110dp 算全开，松手按位置+速度走 1.8s smoothstep 收放），面板四块：WLAN（已开/已关，点了直接开关）、截图、重启（开重启页）、熄屏（锁屏待双击）；亮度/振动两条滑条即时生效（亮度走 `state.brightness`，即背光）。截图在面板收起后 130ms 取，避免把面板拍进照片。锁屏加日期（`App::set_date`，ui 每分钟跟时钟一起刷新），时间/电量按截图排在上三分之一 |
+| `crates/skyward-ui/src/pages.rs` | 解密页：锁图标外套一圈进度环（`stroke_arc`），副标题按步骤换文案（打开分区 → 导入共享密钥 → 读取用户密钥 → 登记系统服务）；进度条加宽到 200dp |
+| `crates/skyward/src/wlanmem.rs`（新）、`skyward-ui`（`settings`/`app`/`pages`）、`crates/skyward/src/ui.rs` | **WLAN 自动连接 / 记住密码**（两开关在 WLAN 页）：自动连接=开机即开 WLAN 并在扫描到后连上次的网络；记住密码=连接成功后把 SSID（十六进制）与密码写 `/metadata/skyward/wlan`（0600，原子 rename）。密码被拒（`WrongPassword`）自动删除；手动断开不会被暗中重连；关掉开关即删除 |
+| `crates/skyward-backup/src/archive.rs`、`crates/skyward/src/backup.rs`、`skyward-ui` | **备份跳过读不了的文件并计数**：第二空间（999）等无密钥文件返回 EACCES/ENOKEY 时不再让整份备份失败，跳过并累加；结果页写「跳过 N 个无法读取的文件」；列不出的目录也当作空的继续 |
+| `crates/skyward-net/src/portal.rs`（新）、`skyward-ui`、`crates/skyward/src/ui.rs`、`vendor/qrcodegen/` | **网络下载页加二维码**：进入下载页且有 WLAN 地址时在 8081 起一个小网页（`Portal`），另一台手机扫码后输入网址，回传即填进地址栏；二维码由 vendored 的 `qrcodegen` 1.8（MIT，`workspace.exclude` 单列，不参与 lint）绘制。另有「从 /sdcard/Download/link.txt 读链接」一行，取第一行非空内容；页面按截图重排：输入框 → 居中按钮 → 文件入口 → 二维码 → 说明 → 进度 |
 
 新增单元测试 24 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 3、`wipe.rs` 1、`fsck.rs` 1、`serve.rs` 6、`download.rs` 2、`skyward-ui` 4）。**验证进度**：推分支 ✅ → `build.yml` lint + test 绿 ✅ → 合并 `fork/main` ✅ → 第二轮改动待 CI → 打包刷机（待做）→ 真机进文件页确认解密后自动重列（待做）。
 
