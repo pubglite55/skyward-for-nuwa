@@ -65,9 +65,31 @@ jobs:
           cat > notes.md <<NOTES
           # Skyward for nuwa · 小米 13 Pro
 
-          基于 kirklin/skyward 0.2.0 的小米 13 Pro 移植版（commit ${GITHUB_SHA::7}）：
-          /data 解密挂载（HyperOS 4 · Android 17，锁屏凭据路径实测）。
-          上游 0.2.0 的功能全部具备：双系统、Skyward 自更新、息屏渐隐与充电界面、按 libmodprobe 加载模块。
+          基于 kirklin/skyward 0.2.0 的移植版，只服务小米 13 Pro（nuwa），commit ${GITHUB_SHA::7}。
+          开机进首页，data 分区按需打开：点「解密」或直接进「文件」时才会去解。
+
+          ## 解密
+          - **跨代密钥**：手机跑的系统比 data 新也能开（如 Android 17 / 补丁 2099-12-31 写出的数据），
+            恢复时写 \`ro.vendor.build.security_patch\` 等三个属性，解除 keymint 的 -62 KEY_REQUIRES_UPGRADE
+          - 任意系统版本的 fstab 都能找到 data 条目（只取前 5 列、容忍多余列、按 \`metadata_encryption\` 选）
+          - 明文 data 直接挂载；ext4 / f2fs 都支持
+          - 跳过第二空间用户 999；记住锁屏密码，下次开机自动解开（失效即删）
+
+          ## 界面
+          - 锁屏：日期、大字时间、电量、滑动解锁；双击亮屏
+          - **下拉控制中心**：WLAN / 截图 / 重启 / 熄屏，亮度与振动滑条
+          - 解密页 5 步进度环；文件、安装、备份、清除都带进度与停止
+          - 音量键可全程操作；音量下 + 电源 = 截图
+
+          ## 网络
+          - WLAN：自动连接（开机即开并连上次的网络）、记住密码（被拒自动丢弃）
+          - 无线传输：同一网段浏览器打开 \`http://手机地址:8080/\`，列目录 / 下载（支持续传）/ 拖放上传
+          - 网络下载：直链下载、断点续传、停止保留；另一台手机扫二维码（8081）输入网址回填，或读 \`link.txt\`
+
+          ## 其它
+          安装 zip / OTA / img、adb sideload、系统更新合并、Skyward 自更新（多镜像测速换源）、
+          A/B 槽位、双系统、挂载、清除（含 miuilog 等 8 个日志目录）、文件管理 / 编辑 / 终端、
+          SELinux 上下文修复、文件系统修复与格式化、日志导出、MTP、备份（跳过错文件并计数）、恢复
 
           ## 刷入（前提：BL 已解锁）
 
@@ -75,10 +97,11 @@ jobs:
           adb reboot bootloader
           fastboot flash recovery_a ${name}.img
           fastboot flash recovery_b ${name}.img
+          fastboot reboot recovery
           \`\`\`
 
-          进入 recovery：关机后按住「电源 + 音量上」，或 adb reboot recovery。
-          刷 recovery 不影响系统与 OTA；回官方 recovery 刷回原厂镜像即可。
+          也可以直接进 recovery 刷 zip（安装 → 选这个 zip）。刷 recovery 不影响系统与 OTA；
+          回官方 recovery 刷回原厂镜像即可。
           NOTES
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 \
             && gh release upload "$GITHUB_REF_NAME" --clobber --repo "$GITHUB_REPOSITORY" "out/$name.zip" "out/SHA256SUMS.txt" \
