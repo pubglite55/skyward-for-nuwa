@@ -7905,7 +7905,7 @@ mod tests {
     }
 
     /// A screen the home page's rows fit on with a little room to spare.
-    const SNUG: u32 = 3000;
+    const SNUG: u32 = 3200;
 
     #[test]
     fn a_home_page_grown_by_an_update_notice_scrolls_down_to_its_last_row() {
