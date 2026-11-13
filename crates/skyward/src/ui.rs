@@ -1,4 +1,5 @@
 use crate::backup;
+use crate::credential;
 use crate::decrypt::{self, Decryptor};
 use crate::filework;
 use crate::haptics::Haptics;
@@ -1112,6 +1113,23 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     let named = locale.map(Lang::for_locale).transpose()?;
     app.take_settings(kept.settings(), named);
     let mut keeper = Keeper::new(&kept);
+    // What opens the users' own files, when the pages are set to keep it:
+    // tried at once when the data partition opens, before the page asks.
+    let mut kept_code: Option<Vec<u8>> = match app.state.remember {
+        true => match credential::read() {
+            Ok(code) => code,
+            Err(e) => {
+                skyward_sys::kmsg(&format!("the credential kept was not read: {e:#}"))?;
+                None
+            }
+        },
+        false => None,
+    };
+    // What was typed at the screen lock this time, to be kept where the
+    // pages say it is, and whether what is being checked is what the phone
+    // kept.
+    let mut typed: Option<Vec<u8>> = None;
+    let mut trying_kept = false;
     skyward_sys::kmsg(&format!(
         "the pages speak {:?}, {}, and the locale named is {}",
         app.state.lang,
@@ -2154,6 +2172,17 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     }
                     closed = opening.closed;
                     show_closed(&mut app, &closed)?;
+                    // What was typed and kept is tried before the page is
+                    // asked for it, so that a start of a phone set to keep
+                    // it opens the files on its own.
+                    if app.state.remember && !closed.is_empty() {
+                        if let (Some(code), Some(user)) = (kept_code.clone(), closed.iter().find(|c| !c.made_up).map(|c| c.user)) {
+                            trying_kept = true;
+                            app.data_checking();
+                            let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential: code };
+                            decryptor = Some(Decryptor::start(job)?);
+                        }
+                    }
                     // What the file page listed before /data opened is stale.
                     relist_after_open(&mut app)?;
                 }
@@ -2172,6 +2201,21 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     app.data_failed(why);
                 }
                 decrypt::Ended::Unlocked(Ok(still)) => {
+                    let from_kept = std::mem::take(&mut trying_kept);
+                    if from_kept && still.iter().any(|c| !c.made_up) {
+                        // What the phone kept did not open them after all:
+                        // it is dropped, and the page asks for one.
+                        kept_code = None;
+                        credential::forget()?;
+                        skyward_sys::kmsg("what was kept no longer opens the files, and is dropped")?;
+                    } else if !from_kept && app.state.remember {
+                        if let Some(code) = typed.take() {
+                            credential::keep(&code)?;
+                            kept_code = Some(code);
+                            skyward_sys::kmsg("the screen lock is kept for the next start")?;
+                        }
+                    }
+                    typed = None;
                     closed = still;
                     show_closed(&mut app, &closed)?;
                     // A screen lock being answered opens storage too, and
@@ -2179,8 +2223,25 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     relist_after_open(&mut app)?;
                 }
                 decrypt::Ended::Unlocked(Err(why)) => {
-                    skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
-                    app.unlock_failed(why, now);
+                    let from_kept = std::mem::take(&mut trying_kept);
+                    typed = None;
+                    if from_kept {
+                        // What was kept is what did not open them: it is
+                        // dropped, and the page asks for a screen lock.
+                        kept_code = None;
+                        credential::forget()?;
+                        skyward_sys::kmsg(&format!("what was kept no longer opens the files, and is dropped: {why}"))?;
+                        show_closed(&mut app, &closed)?;
+                        let said = app.state.lang.pick([
+                            "保存的密码已失效，请重新输入",
+                            "儲存的密碼已失效，請重新輸入",
+                            "The password kept no longer works. Enter it again.",
+                        ]);
+                        app.report(said, now);
+                    } else {
+                        skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
+                        app.unlock_failed(why, now);
+                    }
                 }
             }
             // Screenshots taken while internal storage was closed go into
@@ -2423,9 +2484,22 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     }
                     Effect::Unlock { user, code } => {
                         ensure!(decryptor.is_none(), "the data partition is being opened already");
+                        trying_kept = false;
+                        typed = Some(code.clone().into_bytes());
                         let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential: code.into_bytes() };
                         decryptor = Some(Decryptor::start(job)?);
                     }
+                    // Turning the keeping on says nothing yet: there is
+                    // nothing to keep until a screen lock opens the files.
+                    // Turning it off drops what was kept.
+                    Effect::Remember(on) => match on {
+                        true => skyward_sys::kmsg("the screen lock is to be kept from the next one that opens the files")?,
+                        false => {
+                            kept_code = None;
+                            credential::forget()?;
+                            skyward_sys::kmsg("the screen lock kept is dropped")?;
+                        }
+                    },
                     Effect::ReadDir(folder) => list(&mut app, folder)?,
                     Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
                     // A name taken where an entry goes is the user's to

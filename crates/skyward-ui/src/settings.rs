@@ -49,6 +49,9 @@ pub struct Settings {
     pub vibration: f32,
     /// A computer connected over USB is offered internal storage.
     pub file_transfer: bool,
+    /// The screen lock is kept, so that the next start opens the users' own
+    /// files without asking for it.
+    pub remember: bool,
     pub install: Install,
     pub backup: Backup,
     pub logs: Logs,
@@ -147,6 +150,7 @@ impl Settings {
             vibrate: state.vibrate,
             vibration: state.vibration,
             file_transfer: state.file_transfer,
+            remember: state.remember,
             install: Install { check_signature: state.check_signature, keep_recovery: state.keep_recovery },
             backup: Backup {
                 parts: names(&state.backup, &PARTS),
@@ -220,6 +224,7 @@ impl Settings {
         if let Some(at) = LOG_PLACES.iter().position(|place| *place == self.logs.to) {
             state.logs_to = at;
         }
+        state.remember = self.remember;
         state.sort = SortKey::of(&self.sort.key).unwrap_or_default();
         state.sort_desc = self.sort.desc;
         state.folders_first = self.sort.folders;

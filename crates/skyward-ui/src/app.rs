@@ -577,6 +577,9 @@ pub enum Switch {
     Wireless,
     /// Folders stand before files in the file manager's list.
     FoldersFirst,
+    /// Keep the screen lock, so that the next start opens the users' own
+    /// files without asking for it.
+    Remember,
 }
 
 /// What a backup can take, in the order the backup page lists it.
@@ -1705,6 +1708,9 @@ pub struct State {
     pub vibration: f32,
     /// A computer connected over USB is offered internal storage.
     pub file_transfer: bool,
+    /// The screen lock is kept, so that the next start opens the users' own
+    /// files without asking for it.
+    pub remember: bool,
     /// A browser elsewhere on the network is offered the files in internal
     /// storage.
     pub wireless: bool,
@@ -1897,6 +1903,7 @@ impl Default for State {
             vibrate: true,
             vibration: SLIDER_START,
             file_transfer: true,
+            remember: false,
             // Offered to the network when it is asked for, and not before:
             // the files are the phone's own.
             wireless: false,
@@ -2112,6 +2119,9 @@ pub enum Effect {
     /// Offer the files in internal storage to the network the phone is on,
     /// or stop.
     Wireless(bool),
+    /// Keep what opens the users' own files for the next start, or drop what
+    /// was kept and keep nothing.
+    Remember(bool),
     /// Take the file `url` offers into the downloads folder under `name`.
     StartFetch { url: String, name: String },
     /// Stop taking it.
@@ -3472,6 +3482,15 @@ impl App {
             *self.top_mut() = (Screen::Home, 0.0, Focus::Unset);
         }
         self.settle_page();
+    }
+
+    /// The screen lock is being checked without the page having taken it:
+    /// a credential the phone kept is being tried.
+    pub fn data_checking(&mut self) {
+        if let Data::Locked { checking, .. } = &mut self.state.data {
+            *checking = true;
+        }
+        self.refresh();
     }
 
     /// The data partition did not open, and why.
@@ -5481,6 +5500,7 @@ impl App {
                     Switch::KeepRecovery => &mut self.state.keep_recovery,
                     Switch::ShowPassword => &mut self.state.show_password,
                     Switch::Wireless => &mut self.state.wireless,
+                    Switch::Remember => &mut self.state.remember,
                     Switch::Wlan => unreachable!("the WLAN switch is turned above"),
                     Switch::FoldersFirst => unreachable!("the folders-first switch puts the list in order above"),
                 };
@@ -5492,6 +5512,9 @@ impl App {
                 }
                 if switch == Switch::Wireless {
                     return vec![Effect::Wireless(now_on)];
+                }
+                if switch == Switch::Remember {
+                    return vec![Effect::Remember(now_on)];
                 }
             }
             Action::MountToggle(i) => {

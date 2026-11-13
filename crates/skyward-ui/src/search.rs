@@ -73,6 +73,12 @@ pub const ENTRIES: &[Entry] = &[
     entry(["触摸振动", "觸控震動", "Touch vibration"], SETTINGS, Screen::Settings, &["chumozhendong", "cmzd", "zhendong", "vibrate", "haptic"]),
     entry(["文件传输", "檔案傳輸", "File transfer"], SETTINGS, Screen::Settings, &["wenjianchuanshu", "wjcs", "chuanshu", "mtp", "usb"]),
     entry(
+        ["记住锁屏密码", "記住螢幕鎖定密碼", "Remember the screen lock"],
+        SETTINGS,
+        Screen::Settings,
+        &["jizhumima", "jzmm", "mima", "jiami", "remember", "password"],
+    ),
+    entry(
         ["无线传输", "無線傳輸", "Wireless transfer"],
         ADVANCED,
         Screen::Wireless,

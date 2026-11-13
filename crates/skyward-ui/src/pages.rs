@@ -389,6 +389,15 @@ pub fn settings(cx: &Ctx) -> Frame {
         "When on, a computer can manage the files in internal storage, once it is decrypted.",
     ]);
     y = widgets::footnote(&mut c, t, f, usb.bottom, note);
+    y = widgets::section(&mut c, t, f, y, l.pick(["安全", "安全", "Security"]));
+    let security = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(REMEMBER)).icon(ORANGE, Icon::Lock).trail(Trail::Switch(s.remember))]);
+    out.extend(hits(&security.rows, &[Action::Toggle(Switch::Remember)]));
+    let note = l.pick([
+        "开启后，锁屏密码会保存在 /metadata 上，下次开机自动解密。别人可能拿到这台手机时请关闭。",
+        "開啟後，螢幕鎖定密碼會儲存在 /metadata 上，下次開機自動解密。別人可能拿到這台手機時請關閉。",
+        "When on, the screen lock is kept on /metadata so the next start decrypts without asking. Turn it off where someone else may get the phone.",
+    ]);
+    y = widgets::footnote(&mut c, t, f, security.bottom, note);
     y = widgets::section(&mut c, t, f, y, l.pick(["调试", "偵錯", "Debugging"]));
     let debug = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal)]);
     out.extend(hits(&debug.rows, &[Action::Open(Screen::Terminal)]));
@@ -3154,6 +3163,7 @@ pub fn wireless(cx: &Ctx) -> Frame {
 }
 
 const WIRELESS: Text = ["无线传输", "無線傳輸", "Wireless transfer"];
+const REMEMBER: Text = ["记住锁屏密码", "記住螢幕鎖定密碼", "Remember the screen lock"];
 
 /// A file taken from an address typed on the screen's keyboard, into the
 /// downloads folder: the address, how far it has come, and how it ended.

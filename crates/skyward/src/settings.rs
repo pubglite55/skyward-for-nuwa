@@ -66,7 +66,7 @@ fn write_file(settings: &Settings) -> Result<()> {
 
 /// Do `work` on /metadata, mounted read-only for the moment where it is not
 /// mounted, as in fastboot, and taken away again after.
-fn with_metadata<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
+pub(crate) fn with_metadata<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
     let at = Path::new(METADATA);
     if mount::is_mount_point(at)? {
         return work();
