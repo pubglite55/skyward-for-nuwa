@@ -173,10 +173,11 @@ fn mount_data(entries: &[Entry], keyed: &Entry, device: &Path) -> Result<(Option
 /// in the clear, whatever the table says of encrypting it: a table may keep
 /// the words after the system made the partition afresh without them.
 fn map(service: &KeyMint, entry: &Entry) -> Result<PathBuf> {
-    let device = PathBuf::from(skyward_block::fstab::device(entry)?);
+    let device = skyward_block::fstab::device(entry)?;
+    let path = PathBuf::from(&device);
     let encrypts = entry.extra("metadata_encryption").is_some();
-    if !encrypts || skyward_block::probe::filesystem(&device)?.is_some() {
-        return Ok(device);
+    if !encrypts || skyward_block::probe::filesystem(&path)?.is_some() {
+        return Ok(path);
     }
     let encryption = Encryption::of(entry)?;
     let key = storage_key(service, entry, &encryption)?;
