@@ -3409,7 +3409,9 @@ pub fn browser(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let m = &t.m;
     let b = &s.browser;
-    let top = m.content_top;
+    // The bar sits just under the status bar: the browser shows no page title
+    // of its own to take the room a page's title takes.
+    let top = m.status_cy + m.dp(24.0);
     // Typing the address: the field and the keys, over nothing else.
     if b.typing {
         let mut c = page(cx);
@@ -3441,13 +3443,18 @@ pub fn browser(cx: &Ctx) -> Frame {
         y += h + m.dp(6.0);
     }
     // With nothing shown, the page the browser opens on: its name, a field to
-    // search from, and the pages offered under it.
-    let word_cy = y + m.dp(40.0);
-    let sub_top = word_cy + m.dp(22.0);
-    let search_top = word_cy + m.dp(62.0);
+    // search from, and the pages offered under it, centred in the room the
+    // bar leaves.
     let search_h = m.dp(54.0);
-    let tile = m.dp(84.0);
-    let tiles_top = search_top + search_h + m.dp(44.0);
+    let row_w = m.w as f32 - x * 2.0;
+    let tile = m.dp(84.0).min((row_w - m.dp(24.0)) / 3.0);
+    let block = m.dp(40.0 + 36.0 + 34.0) + search_h + m.dp(40.0) + tile + m.dp(30.0);
+    let room = (m.h as f32 - y - block - m.margin).max(0.0);
+    y += (room / 2.0).min(m.dp(40.0));
+    let word_cy = y + m.dp(40.0);
+    let sub_top = word_cy + m.dp(36.0);
+    let search_top = sub_top + m.dp(34.0);
+    let tiles_top = search_top + search_h + m.dp(40.0);
     if b.page.is_none() && note.is_none() {
         start_page = true;
         y = tiles_top + tile + m.dp(44.0);
@@ -3598,7 +3605,7 @@ pub fn browser(cx: &Ctx) -> Frame {
         );
         c.text_vc(&f.body, l.pick(BROWSE_SEARCH), x + m.dp(48.0), cy, m.dp(16.0), t.pal.placeholder, Some(max_w - m.dp(64.0)));
         out.push(Hit { rect: Rect::new(x, search_top, max_w, search_h), action: Action::BrowseSearch });
-        let gap = (max_w - tile * 3.0) / 2.0;
+        let gap = ((row_w - tile * 3.0) / 2.0).max(m.dp(8.0));
         for (k, (words, _)) in QUICK.iter().enumerate() {
             let tx = x + k as f32 * (tile + gap);
             c.fill_round_rect(tx, tiles_top, tile, tile, m.dp(22.0), QUICK_INK[k]);
