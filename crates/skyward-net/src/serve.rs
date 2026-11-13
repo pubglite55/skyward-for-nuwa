@@ -305,7 +305,7 @@ fn reply(stream: &mut TcpStream, code: u16, kind: &str, body: &[u8]) -> Result<(
 /// Where the address `path` names is, under `root`; nothing where it would
 /// reach outside it.
 fn resolve(root: &Path, path: &str) -> Option<PathBuf> {
-    let path = path.split(|c| c == '?' || c == '#').next().unwrap_or("/");
+    let path = path.split(['?', '#']).next().unwrap_or("/");
     let decoded = percent_decode(path);
     let mut out = root.to_path_buf();
     for part in decoded.split('/') {
