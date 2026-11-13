@@ -35,8 +35,9 @@ This repository carries Skyward to one phone: the **Xiaomi 13 Pro**
 - **Hands storage to a computer** over MTP, and speaks adb and fastbootd.
 - **WLAN**, joining the network kept at the next start by itself, for updates
   straight from the network.
-- **A browser** (Advanced → Browser): type an address, read the page's words
-  and links, and follow them; scripts are not run and pictures are not shown.
+- **A browser** (Advanced → Browser): a page of its own to search from, and
+  the pages it reads with their words, links and pictures (PNG and JPEG);
+  scripts are not run, and SVG or WebP pictures are left out.
 - **Wireless transfer**: a browser on the same network opens
   `http://<phone>:8080/` to list, download and drop files onto the phone.
 - **Downloads from an address**: straight into `Download/`, resumed when
@@ -91,7 +92,7 @@ working; flashing the stock recovery back is all it takes to return to it.
 | Dual boot | A second system in the data partition, installed, switched to, removed |
 | Wireless | Internal storage handed to a browser on the same network: list, download, upload |
 | Download | An address taken into `Download/`, resumed when stopped; a code or `link.txt` brings one |
-| Browser | A page's words and links, read as markup; no scripts, no pictures |
+| Browser | A bar, a start page, and a page's words, links and pictures |
 | Tools | A terminal, the kernel log, and the recovery's own log |
 | Settings | Theme, language, time zone, screen-off time, vibration, file transfer |
 | Reboot | System, recovery, fastboot, bootloader, EDL, and the slot to boot |
