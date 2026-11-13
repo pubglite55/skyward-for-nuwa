@@ -1720,14 +1720,6 @@ pub struct State {
     /// The screen lock is kept, so that the next start opens the users' own
     /// files without asking for it.
     pub remember: bool,
-    /// The panel is dark, and the screen it comes on with is up: the time,
-    /// the battery, and a knob to slide before the page under it is used.
-    pub locked: bool,
-    /// How far that knob has been slid, from 0 at its left end to 1 where
-    /// the page under it is let go.
-    pub lock_pull: f32,
-    /// The time the pages show, as the recovery last told it.
-    pub clock: String,
     /// A browser elsewhere on the network is offered the files in internal
     /// storage.
     pub wireless: bool,
@@ -1921,9 +1913,6 @@ impl Default for State {
             vibration: SLIDER_START,
             file_transfer: true,
             remember: false,
-            locked: false,
-            lock_pull: 0.0,
-            clock: String::new(),
             // Offered to the network when it is asked for, and not before:
             // the files are the phone's own.
             wireless: false,
@@ -2095,6 +2084,14 @@ impl State {
 
 /// One finger, in screen pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
+/// The lock over the page: how far its knob has been slid to the right,
+/// from 0 to 1, and when it was raised.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Lock {
+    pub drag: f32,
+    pub since: u64,
+}
+
 pub enum Touch {
     Down(f32, f32),
     Move(f32, f32),
@@ -2849,8 +2846,8 @@ pub struct App {
     /// A tap on the dark panel, and where it landed: two close together in
     /// time and place light it.
     tapped: Option<(u64, f32, f32)>,
-    /// Where the finger went down on the lock screen's knob.
-    lock_from: Option<f32>,
+    /// The lock over the page, while it stands.
+    lock: Option<Lock>,
     /// The About page's moving field, while that page shows.
     glow: Option<GlowClock>,
     /// The terminal page's shell, from when it is first opened; it goes on
@@ -2944,7 +2941,7 @@ impl App {
             dither: None,
             toast: None,
             tapped: None,
-            lock_from: None,
+            lock: None,
             drag: Drag::Idle,
             tracker: Tracker::default(),
             fling: None,
@@ -3319,7 +3316,9 @@ impl App {
             self.darkening = None;
             self.curtain.set(true, now);
         }
-        self.state.lock_pull = 0.0;
+        if let Some(lock) = &mut self.lock {
+            lock.drag = 0.0;
+        }
         self.woke_at = Some(now);
         self.stir(now);
     }
@@ -3382,12 +3381,11 @@ impl App {
         self.darkening = self.panel(now);
         self.curtain.set(false, now);
         self.display_on = false;
-        // A panel that went dark on its own comes on with the lock screen; a
-        // power key press turns it off and on again without one.
-        // A phone whose touch panel did not come up has no knob to slide,
-        // so its page comes back as it was.
-        self.state.locked = lock && !self.keys;
-        self.state.lock_pull = 0.0;
+        // A panel that went dark on its own comes on with the lock over the
+        // page; a power key press turns it off and on again without one, and
+        // so does a phone whose touch panel did not come up, which would have
+        // no knob to slide.
+        self.lock = (lock && !self.keys).then_some(Lock { drag: 0.0, since: now });
         self.refresh();
         self.bright = full_brightness();
         match std::mem::replace(&mut self.drag, Drag::Idle) {
@@ -4421,6 +4419,11 @@ impl App {
     /// it scrolls into view; that done, make the About page field's dither,
     /// for that page to open without making it. Whether any is left to do.
     pub fn draw_ahead(&mut self, f: &Fonts, info: &DeviceInfo) -> bool {
+        // The lock covers the page, so rows drawn under it would only show
+        // through it.
+        if self.lock.is_some() {
+            return false;
+        }
         let Some(frame) = &self.frame else { return false };
         let (held, h) = (frame.canvas.held(), frame.canvas.h);
         if self.cols < self.w {
@@ -4498,10 +4501,6 @@ impl App {
     /// while a cable has just gone in, both as dark as the content stands
     /// as the panel goes off or comes up.
     pub fn compose(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
-        if self.state.clock != clock {
-            self.state.clock.clear();
-            self.state.clock.push_str(clock);
-        }
         let charge = self.charging.as_ref().map_or(0.0, |c| c.shown.level(now));
         if charge < 1.0 {
             self.compose_page(out, f, info, clock, now);
@@ -4509,7 +4508,32 @@ impl App {
         if charge > 0.0 {
             self.compose_charging(out, f, info, charge, now);
         }
+        if let Some(lock) = self.lock {
+            self.compose_lock(out, f, info, clock, lock.drag);
+        }
         out.dim(self.curtain.level(now));
+    }
+
+    /// The lock over the page: the time in large type, the battery under it,
+    /// and a knob to slide to the right along the foot of the screen.
+    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, drag: f32) {
+        let t = self.theme().clone();
+        let lang = self.state.lang;
+        let m = &t.m;
+        let (w, h) = (m.w as f32, m.h as f32);
+        out.fill_rect(0.0, 0.0, w, h, Rgba::rgb(6, 6, 8).with_alpha(226));
+        out.text_center(&f.title, clock, w / 2.0, h * 0.34, m.dp(64.0), Rgba::rgb(236, 238, 242));
+        if let Some(b) = info.battery.as_ref() {
+            let percent = format!("{}%", b.level);
+            let note = match b.charging() {
+                true => format!("{percent} · {}", lang.pick(["充电中", "充電中", "Charging"])),
+                false => percent,
+            };
+            out.text_center(&f.body, &note, w / 2.0, h * 0.34 + m.dp(62.0), m.dp(18.0), Rgba::rgb(150, 154, 164));
+        }
+        let track = self.lock_track();
+        let label = lang.pick(["滑动解锁", "滑動解鎖", "Slide to unlock"]);
+        widgets::confirm(out, &t, f, track.y, label, false, drag);
     }
 
     /// The charging screen, `level` of the way over the page drawn on `out`.
@@ -6360,35 +6384,39 @@ impl App {
     /// lock screen be used again.
     fn slide_lock(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
         self.stir(now);
-        let reach = (self.w as f32 * 0.62).max(1.0);
+        let track = self.lock_track();
+        // The knob's middle runs from the track's left end to its right, so
+        // a finger is read against the run it can push it along.
+        let (from, run) = (track.x + track.h / 2.0, (track.w - track.h).max(1.0));
         match ev {
-            Touch::Down(x, _) => {
-                self.lock_from = Some(x);
-                if self.state.lock_pull != 0.0 {
-                    self.state.lock_pull = 0.0;
-                    self.refresh();
-                }
-            }
-            Touch::Move(x, _) => {
-                if let Some(from) = self.lock_from {
-                    let pull = ((x - from) / reach).clamp(0.0, 1.0);
-                    if (pull - self.state.lock_pull).abs() > 0.005 {
-                        self.state.lock_pull = pull;
+            Touch::Down(x, _) | Touch::Move(x, _) => {
+                if let Some(lock) = &mut self.lock {
+                    let drag = ((x - from) / run).clamp(0.0, 1.0);
+                    if (drag - lock.drag).abs() > 0.005 {
+                        lock.drag = drag;
                         self.refresh();
                     }
                 }
             }
             Touch::Up => {
-                let went = self.state.lock_pull >= LOCK_PULL;
-                self.lock_from = None;
-                self.state.lock_pull = 0.0;
+                let went = self.lock.is_some_and(|l| l.drag >= LOCK_PULL);
                 if went {
-                    self.state.locked = false;
+                    self.lock = None;
+                } else if let Some(lock) = &mut self.lock {
+                    lock.drag = 0.0;
                 }
                 self.refresh();
             }
         }
         Vec::new()
+    }
+
+    /// Where the lock's knob slides: the bar drawn along the foot of the
+    /// screen, as the other swipe-to-confirm controls are.
+    pub fn lock_track(&self) -> Rect {
+        let m = &self.theme().m;
+        let inset = m.margin + m.dp(14.0);
+        Rect::new(inset, m.h as f32 - m.dp(150.0), m.w as f32 - inset * 2.0, m.dp(56.0))
     }
 
     pub fn touch(&mut self, ev: Touch, f: &Fonts, now: u64) -> Vec<Effect> {
@@ -6408,8 +6436,8 @@ impl App {
             }
             return Vec::new();
         }
-        // The lock screen takes every touch until its knob is slid home.
-        if self.state.locked {
+        // The lock takes every touch until its knob is slid home.
+        if self.lock.is_some() {
             return self.slide_lock(ev, now);
         }
         // A finger on the charging screen sends it away for the page, and
@@ -10311,7 +10339,7 @@ mod tests {
     }
 
     #[test]
-    fn the_dark_panel_lights_on_a_double_tap_and_the_lock_screen_lets_it_go() {
+    fn the_dark_panel_lights_on_a_double_tap_and_the_lock_lets_it_go() {
         let (f, _i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
         app.sleep(1000, true);
@@ -10320,18 +10348,19 @@ mod tests {
         assert!(!app.display_on(), "one tap lights nothing");
         app.touch(Touch::Down(140.0, 320.0), &f, 1200);
         assert!(app.display_on(), "two taps close together light it");
-        assert_eq!(app.screen(), Screen::Home, "the page under the lock screen is still the one it was");
-        assert!(app.state.locked, "and it comes on with the lock screen");
-        // A touch that is not slid home leaves the lock screen up.
-        app.touch(Touch::Down(100.0, 900.0), &f, 2000);
-        app.touch(Touch::Move(120.0, 900.0), &f, 2020);
+        assert!(app.lock.is_some(), "and it comes on with the lock over the page");
+        assert_eq!(app.screen(), Screen::Home, "the page under the lock is the one it was");
+        // A knob not slid home leaves the lock up.
+        let track = app.lock_track();
+        app.touch(Touch::Down(track.x + 10.0, track.y + 10.0), &f, 2000);
+        app.touch(Touch::Move(track.x + 60.0, track.y + 10.0), &f, 2020);
         app.touch(Touch::Up, &f, 2040);
-        assert!(app.state.locked, "a short slide lets nothing go");
+        assert!(app.lock.is_some(), "a short slide lets nothing go");
         // Slid home, the page under it is used again.
-        app.touch(Touch::Down(100.0, 900.0), &f, 3000);
-        app.touch(Touch::Move(100.0 + W as f32 * 0.55, 900.0), &f, 3050);
+        app.touch(Touch::Down(track.x + 5.0, track.y + 10.0), &f, 3000);
+        app.touch(Touch::Move(track.x + track.w - 5.0, track.y + 10.0), &f, 3050);
         app.touch(Touch::Up, &f, 3100);
-        assert!(!app.state.locked, "slid home, the page under it is used again");
+        assert!(app.lock.is_none(), "slid home, the lock is gone");
     }
 
     #[test]
