@@ -292,6 +292,7 @@ pub fn home(cx: &Ctx) -> Frame {
         y = first.bottom + t.m.card_gap;
     }
     let tools = widgets::list(&mut c, t, f, y, &[
+        Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new(l.pick(["安装", "安裝", "Install"])).icon(GREEN, Icon::Install),
         Row::new(l.pick(["备份", "備份", "Backup"])).icon(BLUE, Icon::Backup),
         Row::new(l.pick(["恢复", "還原", "Restore"])).icon(PURPLE, Icon::Restore),
@@ -299,6 +300,7 @@ pub fn home(cx: &Ctx) -> Frame {
         Row::new(l.pick(DECRYPT)).icon(BLUE, Icon::Lock).trail(Trail::Value(fmt::data(l, &cx.state.data))),
     ]);
     out.extend(hits(&tools.rows, &[
+        Action::Open(Screen::Files),
         Action::Open(Screen::Install),
         Action::Open(Screen::Backup),
         Action::Open(Screen::Restore),
