@@ -5,16 +5,18 @@ use skyward_install::{Failure, ImageKind, Outcome, Ramdisk, Reflash, Refusal, St
 use skyward_net::download::{Failure as DownloadFailure, Progress};
 use skyward_net::github::{Build, Newest};
 use skyward_net::reach::Reach;
+use skyward_net::html::{Block, Page};
 use skyward_net::release::{Release, Unanswered};
 use skyward_net::supplicant::Security;
 use skyward_net::wlan::{Bands, Joined, Link, Network, Power, Stage as Joining, Traffic, Wlan};
 use skyward_systems::{Named, Other, Overview, Who};
 use skyward_ui::app::{
-    Action, Adding, App, Asked, BackupAt, BackupEnd, BackupEntry, BackupJob, BackupRefusal, Choice, Clip, Damage, Data, DownloadEnd,
+    Action, Adding, App, Asked, BackupAt, BackupEnd, BackupEntry, BackupJob, BackupRefusal, BrowseStatus, Choice, Clip, Damage, Data, DownloadEnd,
     DownloadJob, EraseStop, Field, FileKind, FileOp, FileRow, FileTask, FsAction, FsRow, Have, Held, Install, ItemEnd, JobEnd, Key, Keys,
     MountFailure, MountRow, Part, PartKind, PartStop, Pick, Place, Screen, SkywardEnd, SkywardJob, SkywardStage, Source, SystemChoice,
     SystemsWork, TermEnd, Touch, UsbDrive, UsbLink, SCREEN_OFF,
 };
+use skyward_ui::picture::Picture;
 use skyward_ui::widgets::{self, Bar, Bolt, Cap, Layer};
 use skyward_ui::{editor, fmt, pages, Canvas, Ctx, Fonts, Lang, Theme};
 use skyward_vab::{BootSlots, FailureCode, Hold, Slot, SnapshotState, Standing};
@@ -196,6 +198,52 @@ fn main() -> Result<()> {
     app.state.dark = true;
     app.state.screen_off = SCREEN_OFF.iter().position(Option::is_none).expect("one choice keeps the screen on");
     let path = out.join("14-screen-off-never-dark.png");
+    write_png(&path, &whole_page(&mut app, &fonts, &info))?;
+    println!("wrote {}", path.display());
+
+    // The browser: the page it opens on, and a page of the web read, its
+    // picture and all.
+    let mut app = opened(Screen::Browser, w, h, ppd);
+    let path = out.join("15-browser-start-light.png");
+    write_png(&path, &whole_page(&mut app, &fonts, &info))?;
+    println!("wrote {}", path.display());
+
+    let mut app = opened(Screen::Browser, w, h, ppd);
+    app.state.dark = true;
+    {
+        let b = &mut app.state.browser;
+        b.at = "https://cn.bing.com/search?q=skyward".into();
+        b.url = b.at.clone();
+        b.status = BrowseStatus::Shown;
+        b.history.push("https://cn.bing.com/".into());
+        let (pw, ph) = (120u32, 40u32);
+        let mut rgba = Vec::with_capacity((pw * ph * 4) as usize);
+        for y in 0..ph {
+            for x in 0..pw {
+                rgba.extend_from_slice(&[(x * 2) as u8, (y * 5 + 60) as u8, 200, 255]);
+            }
+        }
+        b.images.insert("https://cn.bing.com/logo.png".into(), Picture { w: pw, h: ph, rgba });
+        b.page = Some(Page {
+            title: "skyward · 必应搜索".into(),
+            blocks: vec![
+                Block::Image { to: "https://cn.bing.com/logo.png".into(), alt: "skyward".into() },
+                Block::Words("Skyward 是一个用 Rust 写的恢复，服务于小米 13 Pro。".into()),
+                Block::Heading("网页结果".into()),
+                Block::Link {
+                    words: "kirklin/skyward: a recovery written in Rust".into(),
+                    to: "https://github.com/kirklin/skyward".into(),
+                },
+                Block::Words("恢复里的界面、解密、备份与安装，都由这一个程序做。".into()),
+                Block::Link {
+                    words: "skyward for nuwa · 发布".into(),
+                    to: "https://github.com/pubglite55/skyward-for-nuwa/releases".into(),
+                },
+                Block::Words("最新的构建在这里发布，刷入 recovery_a 与 recovery_b 即可。".into()),
+            ],
+        });
+    }
+    let path = out.join("16-browser-page-dark.png");
     write_png(&path, &whole_page(&mut app, &fonts, &info))?;
     println!("wrote {}", path.display());
 
