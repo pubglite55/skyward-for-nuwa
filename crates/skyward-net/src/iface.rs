@@ -76,6 +76,28 @@ pub fn hardware_address(interface: &str) -> Result<[u8; 6]> {
     Ok(mac)
 }
 
+/// The address the interface has, where it has one: a phone that has not
+/// joined a network yet has none.
+pub fn address(interface: &str) -> Result<Option<Ipv4Addr>> {
+    let fd = socket()?;
+    let mut r = request(interface)?;
+    let doing = format!("read the address of {interface}");
+    if unsafe { libc::ioctl(fd.as_raw_fd(), libc::SIOCGIFADDR as libc::c_int, (&mut r as *mut libc::ifreq).cast::<libc::c_void>()) } != 0 {
+        let e = std::io::Error::last_os_error();
+        // The kernel says this of an interface that is there and has no
+        // address on it, which is where a phone that has joined nothing
+        // stands, rather than of one that is not there at all.
+        if e.raw_os_error() == Some(libc::EADDRNOTAVAIL) {
+            return Ok(None);
+        }
+        return Err(e).with_context(|| doing);
+    }
+    let inet = unsafe { std::mem::transmute::<libc::sockaddr, libc::sockaddr_in>(r.ifr_ifru.ifru_addr) };
+    // The bytes are the address's own, as they are on the wire and as
+    // `sockaddr` above puts them there.
+    Ok(Some(Ipv4Addr::from(inet.sin_addr.s_addr.to_ne_bytes())))
+}
+
 /// Bring the interface up, or take it down.
 pub fn set_up(interface: &str, up: bool) -> Result<()> {
     let fd = socket()?;

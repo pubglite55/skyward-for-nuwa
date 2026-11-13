@@ -7,6 +7,7 @@ pub mod http;
 pub mod iface;
 pub mod reach;
 pub mod release;
+pub mod serve;
 pub mod supplicant;
 pub mod wlan;
 

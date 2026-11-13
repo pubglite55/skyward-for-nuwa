@@ -109,6 +109,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::WlanPassword => wlan_password(cx),
         Screen::WlanNetwork => wlan_network(cx),
         Screen::WlanAdd => wlan_add(cx),
+        Screen::Wireless => wireless(cx),
     }
 }
 
@@ -385,6 +386,11 @@ pub fn settings(cx: &Ctx) -> Frame {
         "When on, a computer can manage the files in internal storage, once it is decrypted.",
     ]);
     y = widgets::footnote(&mut c, t, f, usb.bottom, note);
+    y = widgets::section(&mut c, t, f, y, l.pick(["网络", "網路", "Network"]));
+    let wireless_state = if s.wireless { l.pick(["开", "開", "On"]) } else { l.pick(["关", "關", "Off"]) };
+    let network = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(WIRELESS)).icon(GREEN, Icon::Wlan).trail(Trail::Value(wireless_state))]);
+    out.extend(hits(&network.rows, &[Action::Open(Screen::Wireless)]));
+    y = network.bottom;
     y = widgets::section(&mut c, t, f, y, l.pick(["调试", "偵錯", "Debugging"]));
     let debug = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal)]);
     out.extend(hits(&debug.rows, &[Action::Open(Screen::Terminal)]));
@@ -3091,6 +3097,51 @@ pub fn wlan_network(cx: &Ctx) -> Frame {
     out.extend(hits(&forget.rows, &[Action::LeaveNetwork]));
     Frame::new(t, fit(c, t, forget.bottom), out, title, top)
 }
+
+/// The files in internal storage offered to the network the phone is on:
+/// the switch, the address a browser there opens, and how many requests it
+/// has answered.
+pub fn wireless(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    let switch = widgets::list(&mut c, t, f, top, &[Row::new(l.pick(WIRELESS)).icon(GREEN, Icon::Wlan).trail(Trail::Switch(s.wireless))]);
+    out.extend(hits(&switch.rows, &[Action::Toggle(Switch::Wireless)]));
+    let mut y = switch.bottom;
+    if !s.wireless {
+        let note = l.pick([
+            "开启后，同一 WLAN 下的设备用浏览器打开这里给出的地址，就能查看、下载和上传内部存储中的文件。",
+            "開啟後，同一 Wi-Fi 下的裝置用瀏覽器開啟這裡給出的位址，就能檢視、下載和下載內部儲存空間中的檔案。",
+            "When on, a device on the same network opens the address given here in a browser to see, take and put files in internal storage.",
+        ]);
+        y = widgets::footnote(&mut c, t, f, y, note);
+    } else if let Some(url) = &s.wireless_url {
+        let served = s.wireless_served.to_string();
+        let rows = [
+            Row::new(url.as_str()).icon(BLUE, Icon::Globe).subtitle(l.pick(["在浏览器中打开", "在瀏覽器中開啟", "Open it in a browser"])),
+            Row::new(l.pick(["已回应", "已回應", "Answered"])).trail(Trail::Value(served.as_str())),
+        ];
+        let list = widgets::list(&mut c, t, f, y, &rows);
+        y = list.bottom;
+        let note = l.pick([
+            "同一网络里的设备都能打开这一页，也能上传和下载。关掉开关或离开恢复模式，它就消失。",
+            "同一網路裡的裝置都能開啟這一頁，也能上傳和下載。關掉開關或離開復原模式，它就消失。",
+            "Any device on the network can open it, and put files there too. It goes when the switch is turned off.",
+        ]);
+        y = widgets::footnote(&mut c, t, f, y, note);
+    } else {
+        let note = l.pick([
+            "手机还没有网络地址：请先在「设置」里连接 WLAN，地址会出现在这里。",
+            "手機還沒有網路位址：請先在「設定」裡連線 Wi-Fi，位址會出現在這裡。",
+            "The phone has no address yet: join a network in Settings, and the address shows here.",
+        ]);
+        y = widgets::footnote(&mut c, t, f, y, note);
+    }
+    Frame::new(t, fit(c, t, y), out, l.pick(WIRELESS), top)
+}
+
+const WIRELESS: Text = ["无线传输", "無線傳輸", "Wireless transfer"];
 
 /// The file manager, every entry of the folder shown, folders first.
 pub fn files(cx: &Ctx) -> Frame {

@@ -135,6 +135,9 @@ pub enum Screen {
     /// A network added by hand: its name, how it is protected and its
     /// password, typed on the screen's keyboard.
     WlanAdd,
+    /// The files in internal storage offered to the network the phone is
+    /// on, and the address a browser reaches them by.
+    Wireless,
 }
 
 /// How far asking the update server for the newest system has come.
@@ -563,6 +566,8 @@ pub enum Switch {
     Wlan,
     /// Show the password typed rather than a dot for each character.
     ShowPassword,
+    /// Offer internal storage to the network the phone is on.
+    Wireless,
 }
 
 /// What a backup can take, in the order the backup page lists it.
@@ -1598,6 +1603,14 @@ pub struct State {
     pub vibration: f32,
     /// A computer connected over USB is offered internal storage.
     pub file_transfer: bool,
+    /// A browser elsewhere on the network is offered the files in internal
+    /// storage.
+    pub wireless: bool,
+    /// The address that browser reaches them by; none while the phone has
+    /// no address of its own.
+    pub wireless_url: Option<String>,
+    /// How many requests the server has answered.
+    pub wireless_served: u64,
     pub reboot: usize,
     /// What the wipe page has chosen, by place in [`WIPES`].
     pub wipe: [bool; WIPES.len()],
@@ -1772,6 +1785,11 @@ impl Default for State {
             vibrate: true,
             vibration: SLIDER_START,
             file_transfer: true,
+            // Offered to the network when it is asked for, and not before:
+            // the files are the phone's own.
+            wireless: false,
+            wireless_url: None,
+            wireless_served: 0,
             reboot: 0,
             wipe: [false; WIPES.len()],
             cache_partition: false,
@@ -1972,6 +1990,9 @@ pub enum Effect {
     Screenshot { storage: bool },
     /// Offer internal storage to a computer over USB, or stop.
     FileTransfer(bool),
+    /// Offer the files in internal storage to the network the phone is on,
+    /// or stop.
+    Wireless(bool),
     /// Start receiving a package over USB.
     Sideload,
     /// Start installing the file at this path from the top of a place,
@@ -4736,6 +4757,48 @@ impl App {
         self.say(why, now);
     }
 
+    /// The files in internal storage are served, at `url` where the phone
+    /// has an address to reach them by.
+    pub fn wireless_started(&mut self, url: Option<String>) {
+        self.state.wireless = true;
+        self.state.wireless_url = url;
+        self.state.wireless_served = 0;
+        self.refresh();
+    }
+
+    /// The files are no longer served.
+    pub fn wireless_stopped(&mut self) {
+        self.state.wireless = false;
+        self.state.wireless_url = None;
+        self.state.wireless_served = 0;
+        self.refresh();
+    }
+
+    /// The address the phone has now, as the server is reached by it; none
+    /// while it has none.
+    pub fn wireless_at(&mut self, url: Option<String>) {
+        if self.state.wireless_url != url {
+            self.state.wireless_url = url;
+            self.refresh();
+        }
+    }
+
+    /// How many requests the server has answered.
+    pub fn wireless_served(&mut self, served: u64) {
+        if self.state.wireless_served != served {
+            self.state.wireless_served = served;
+            self.refresh();
+        }
+    }
+
+    /// The files could not be served, as the system says why.
+    pub fn wireless_failed(&mut self, why: &str, now: u64) {
+        self.state.wireless = false;
+        self.state.wireless_url = None;
+        self.refresh();
+        self.say(why, now);
+    }
+
     fn say(&mut self, text: &str, now: u64) {
         self.toast = Some((text.to_string(), now + TOAST_MS));
         self.dirty = true;
@@ -5203,6 +5266,7 @@ impl App {
                     Switch::Signature => &mut self.state.check_signature,
                     Switch::KeepRecovery => &mut self.state.keep_recovery,
                     Switch::ShowPassword => &mut self.state.show_password,
+                    Switch::Wireless => &mut self.state.wireless,
                     Switch::Wlan => unreachable!("the WLAN switch is turned above"),
                 };
                 *on = !*on;
@@ -5210,6 +5274,9 @@ impl App {
                 self.refresh();
                 if switch == Switch::FileTransfer {
                     return vec![Effect::FileTransfer(now_on)];
+                }
+                if switch == Switch::Wireless {
+                    return vec![Effect::Wireless(now_on)];
                 }
             }
             Action::MountToggle(i) => {
@@ -8139,6 +8206,34 @@ mod tests {
         assert_eq!(tap_at(&mut app, &f, &i, Action::Toggle(Switch::FileTransfer), 3000), [Effect::FileTransfer(true)]);
         app.file_transfer_failed(false, "无法开启文件传输", 4000);
         assert!(!app.state.file_transfer, "the switch shows how it stands");
+    }
+
+    #[test]
+    fn the_wireless_switch_has_the_runtime_serve_the_files() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Wireless, W, H, PPD);
+        assert!(!app.state.wireless, "the files are the phone's own, and not served until asked");
+        assert_eq!(tap_at(&mut app, &f, &i, Action::Toggle(Switch::Wireless), 1000), [Effect::Wireless(true)]);
+        assert!(app.state.wireless);
+        app.wireless_started(Some("http://192.168.1.5:8080/".into()));
+        assert_eq!(app.state.wireless_url.as_deref(), Some("http://192.168.1.5:8080/"));
+        app.wireless_served(3);
+        assert_eq!(app.state.wireless_served, 3, "the page says how many requests were answered");
+        app.wireless_stopped();
+        assert!(!app.state.wireless, "the switch shows how it stands");
+        assert_eq!(app.state.wireless_url, None, "and the address goes with it");
+    }
+
+    #[test]
+    fn the_network_row_opens_the_wireless_page() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let (_, y) = spot(&mut app, &f, &i, Action::Open(Screen::Wireless));
+        if y > H as f32 * 0.9 {
+            scroll_to(&mut app, &f, y - H as f32 * 0.8, 0);
+        }
+        tap_at(&mut app, &f, &i, Action::Open(Screen::Wireless), 1000);
+        assert_eq!(app.screen(), Screen::Wireless);
     }
 
     /// Flick the page up from `start`: the finger travels `step` px every

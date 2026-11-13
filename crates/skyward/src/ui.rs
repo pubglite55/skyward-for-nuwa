@@ -1004,6 +1004,14 @@ fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
     w.as_ref().context("the phone's WLAN is not brought up")
 }
 
+/// The address the files served are reached by, where the phone has one:
+/// the address its WLAN interface was given.
+fn wireless_url(cfg: &DeviceConfig, port: u16) -> Option<String> {
+    let interface = cfg.wlan.as_ref().map(|wlan| wlan.interface.as_str())?;
+    let address = skyward_net::iface::address(interface).ok().flatten()?;
+    Some(format!("http://{address}:{port}/"))
+}
+
 /// The installed system, as the update server is told of it.
 fn installed(cfg: &DeviceConfig, info: &skyward_info::DeviceInfo) -> Result<Installed> {
     let slot = info.slot.context("only an A/B phone is updated")?;
@@ -1150,6 +1158,11 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // storage while that is open; one that does not start says why on
     // screen, and the recovery carries on.
     let mut transfer: Option<Transfer> = None;
+    // The files in internal storage served to the network the phone is on,
+    // while their switch is on; the address the page gives follows the one
+    // the phone has.
+    let mut files: Option<skyward_net::serve::Server> = None;
+    let mut files_at = Instant::now();
     if app.state.file_transfer {
         match Transfer::start(cfg, &info, app.state.time_zone) {
             Ok(t) => transfer = Some(t),
@@ -1932,6 +1945,16 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                 app.set_traffic(t);
             }
         }
+        // The address a browser reaches the files by follows the one the
+        // phone is given, and what the page says of the server follows what
+        // it has answered.
+        if let Some(server) = &files {
+            if files_at.elapsed().as_secs() >= 2 {
+                files_at = Instant::now();
+                app.wireless_at(wireless_url(cfg, server.port()));
+            }
+            app.wireless_served(server.served());
+        }
         // The WLAN page scans again now and then while it shows, as the
         // stock settings do.
         let wlan_on = app.state.wlan.as_ref().is_some_and(|w| w.power == WlanPower::On);
@@ -2657,6 +2680,42 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                             (on, t) => unreachable!("the switch turned file transfer {on} while it was {}", t.is_some()),
                         }
                     }
+                    // The files in internal storage go to the network the
+                    // phone is on while the switch is on: only where the
+                    // partition they are in is open, since there would be
+                    // nothing to serve otherwise.
+                    Effect::Wireless(on) => match (on, files.take()) {
+                        (true, None) => {
+                            if !app.state.data.storage_open() {
+                                app.wireless_failed(skyward_ui::fmt::wireless_needs_data(app.state.lang), now);
+                                skyward_sys::kmsg("the files are not served: the data partition is closed")?;
+                            } else {
+                                match skyward_net::serve::Server::start(PathBuf::from(skyward_crypto::data::SDCARD)) {
+                                    Ok(server) => {
+                                        let url = wireless_url(cfg, server.port());
+                                        skyward_sys::kmsg(&format!(
+                                            "the files in {} are served at {}",
+                                            skyward_crypto::data::SDCARD,
+                                            url.as_deref().unwrap_or("no address yet")
+                                        ))?;
+                                        files = Some(server);
+                                        files_at = Instant::now();
+                                        app.wireless_started(url);
+                                    }
+                                    Err(e) => {
+                                        skyward_sys::kmsg(&format!("the files could not be served: {e:#}"))?;
+                                        app.wireless_failed(&skyward_ui::fmt::wireless_failed(app.state.lang, &format!("{e:#}")), now);
+                                    }
+                                }
+                            }
+                        }
+                        (false, Some(server)) => {
+                            drop(server);
+                            skyward_sys::kmsg("the files are no longer served")?;
+                            app.wireless_stopped();
+                        }
+                        (on, server) => unreachable!("the switch turned the files {on} while they were {}", server.is_some()),
+                    },
                 }
             }
         }
