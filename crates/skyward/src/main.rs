@@ -775,7 +775,7 @@ fn recovery() -> Result<()> {
         // Which blob a phone's users' secrets are read from, where it keeps
         // two: said once, before the data partition is opened.
         #[cfg(target_os = "android")]
-        skyward_crypto::data::use_weaver_first(cfg.data.as_ref().map_or(true, |data| data.weaver_first));
+        skyward_crypto::data::use_weaver_first(cfg.data.as_ref().is_none_or(|data| data.weaver_first));
         skyward_sys::kmsg(&format!(
             "{} {} recovery up, misc command {:?} args {:?}, asking for {:?}",
             cfg.device.codename,
