@@ -3036,6 +3036,24 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                             worker.stop();
                         }
                     }
+                    // A link a computer put in a file, taken from there: the
+                    // first line that is not blank.
+                    Effect::FetchFromFile => {
+                        let at = Path::new("/sdcard/Download/link.txt");
+                        match fs::read_to_string(at) {
+                            Ok(text) => match text.lines().map(str::trim).find(|line| !line.is_empty()) {
+                                Some(link) => app.fetch_link(link.to_string(), now),
+                                None => {
+                                    let why = skyward_ui::fmt::no_link_in(app.state.lang, at.display().to_string());
+                                    app.fetch_link_missing(why, now);
+                                }
+                            },
+                            Err(e) => {
+                                let why = skyward_ui::fmt::no_link_at(app.state.lang, at.display().to_string(), &e.to_string());
+                                app.fetch_link_missing(why, now);
+                            }
+                        }
+                    }
                 }
             }
         }
