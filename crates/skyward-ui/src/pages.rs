@@ -694,6 +694,7 @@ pub fn decrypt(cx: &Ctx) -> Frame {
             l.pick(["解密 data 分区", "解密 data 分割區", "Decrypt the data partition"]),
             Some(l.pick(["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"])),
             None,
+            matches!(cx.state.data, Data::Opening).then_some(cx.state.opening),
         ),
         Data::Open => data_status(
             cx,
@@ -702,8 +703,9 @@ pub fn decrypt(cx: &Ctx) -> Frame {
             l.pick(["data 分区已解密", "data 分割區已解密", "The data partition is decrypted"]),
             Some(l.pick(["你可以在「文件管理」中查看本机文件", "你可以在「檔案管理」中查看本機檔案", "You can see the phone's files in File manager"])),
             None,
+            None,
         ),
-        Data::Failed(why) => data_status(cx, c, Icon::Lock, l.pick(["未能打开 data 分区", "無法開啟 data 分割區", "Couldn't open the data partition"]), None, Some(why)),
+        Data::Failed(why) => data_status(cx, c, Icon::Lock, l.pick(["未能打开 data 分区", "無法開啟 data 分割區", "Couldn't open the data partition"]), None, Some(why), None),
         Data::Erased => data_status(
             cx,
             c,
@@ -711,13 +713,14 @@ pub fn decrypt(cx: &Ctx) -> Frame {
             l.pick(DATA_ERASED),
             Some(l.pick(["下次开机时将重新创建", "下次開機時將重新建立", "It's made anew when the phone next starts"])),
             None,
+            None,
         ),
     }
 }
 
 /// Where the partition stands, under its sign: a line on it, or why it
 /// did not open and a way to try again; then the way off the page.
-fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&str>, why: Option<&str>) -> Frame {
+fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&str>, why: Option<&str>, progress: Option<f32>) -> Frame {
     let (t, f, l) = (cx.t, cx.f, cx.state.lang);
     let m = &t.m;
     let x = m.w as f32 / 2.0;
@@ -727,6 +730,9 @@ fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&s
     c.text_center(&f.heading, title, x, sign_cy + m.dp(64.0), m.dp(24.0), t.pal.text);
     if let Some(note) = note {
         c.text_center(&f.body, note, x, sign_cy + m.dp(98.0), m.sub_px, t.pal.subtitle);
+    }
+    if let Some(value) = progress {
+        widgets::progress_bar(&mut c, t, x - m.dp(80.0), sign_cy + m.dp(122.0), m.dp(160.0), value);
     }
     let mut out = Vec::new();
     if let Some(why) = why {

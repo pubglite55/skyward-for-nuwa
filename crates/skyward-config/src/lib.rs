@@ -84,6 +84,9 @@ pub struct DeviceConfig {
     /// The stock build the recovery is made on.
     #[serde(default)]
     pub stock: Option<Stock>,
+    /// Which blob a user's secret is read from, on a phone that keeps two.
+    #[serde(default)]
+    pub data: Option<Data>,
 }
 
 /// The stock build a recovery is made on: the phone maker's full update
@@ -202,6 +205,21 @@ pub struct Wipe {
     /// records, the folders staying.
     #[serde(default)]
     pub logs: Vec<String>,
+}
+
+/// Which blob a user's secret is read from, on a phone that keeps two.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Data {
+    /// Whether the weaver's own slots are used, where the phone has a weaver.
+    /// A phone whose weaver answers keeps its users' secrets there and opens
+    /// them with it; said false, the blob the credential service guards
+    /// beside it is taken instead, for a weaver a recovery cannot reach.
+    #[serde(default = "yes")]
+    pub weaver_first: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// The data partition, which the folders erasing takes in are in.
@@ -859,5 +877,20 @@ mod tests {
         assert!(optional.wlan.unwrap().firmware[0].optional, "a file the phone works without says so");
         let needed = with("{ name = \"wlan/a.ini\", path = \"/vendor/etc/a.ini\" }").unwrap();
         assert!(!needed.wlan.unwrap().firmware[0].optional, "one that says nothing is needed");
+    }
+
+    #[test]
+    fn the_blob_a_secret_is_read_from_is_said_where_the_phone_keeps_two() {
+        let base = "[device]
+codename = \"x\"
+";
+        let silent = DeviceConfig::parse(&format!("{base}[data]
+")).unwrap();
+        assert!(silent.data.unwrap().weaver_first, "left unsaid, the weaver's own slots are used");
+        let other = DeviceConfig::parse(&format!("{base}[data]
+weaver_first = false
+")).unwrap();
+        assert!(!other.data.unwrap().weaver_first, "said false, the other blob is taken");
+        assert!(DeviceConfig::parse(base).unwrap().data.is_none(), "a phone that keeps one says nothing");
     }
 }

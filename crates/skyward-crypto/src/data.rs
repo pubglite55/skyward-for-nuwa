@@ -17,6 +17,7 @@ use skyward_block::fsck::Checked;
 use skyward_block::fstab::Entry;
 use skyward_block::{dm, mount};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 /// Where the data partition is mounted, and the name its decrypted form is
 /// given among the device-mapper's devices.
@@ -31,6 +32,34 @@ pub const SDCARD: &str = "/sdcard";
 
 /// The phone's owner, the first of its users.
 const OWNER: u32 = 0;
+
+/// The second space HyperOS keeps: a user of its own, whose files are kept
+/// behind the owner's credential. Opening them is a second unlock, behind the
+/// one the page asked for, and one that can leave the page waiting; the
+/// recovery leaves them closed.
+const SECOND_SPACE: u32 = 999;
+
+/// How far an opening has come, for the page that waits on it: the number of
+/// the steps below it has taken, the last of which is set as it returns.
+static STEP: AtomicU8 = AtomicU8::new(0);
+
+/// The steps an opening goes through: the partition, the files that are no
+/// one user's, then each user's own.
+const STEPS: u8 = 5;
+
+/// Zero the steps for a job about to start.
+pub fn restart() {
+    STEP.store(0, Ordering::Relaxed);
+}
+
+/// How far the opening has come, from 0 to 1, 1 being its end.
+pub fn progress() -> f32 {
+    f32::from(STEP.load(Ordering::Relaxed)) / f32::from(STEPS)
+}
+
+fn at(step: u8) {
+    STEP.store(step, Ordering::Relaxed);
+}
 
 /// The key is in a directory of this name under the one the phone names.
 const KEY_DIR: &str = "key";
@@ -266,14 +295,22 @@ pub struct Opening {
 /// sign in, and open the own files of every user who set no screen lock
 /// and, behind the owner's, of those whose credential the phone made up.
 pub fn open_without_credential(service: &KeyMint) -> Result<Opening> {
+    at(1);
     let mounted = match mount::is_mount_point(Path::new(MOUNT))? {
         true => None,
         false => Some(open(service)?),
     };
+    at(2);
     open_shared(service)?;
+    at(3);
     let mut closed = Vec::new();
     let mut owner = Note::default();
     for user in open_users(service)? {
+        // The second space's own files are kept behind the owner's credential,
+        // so opening them is a second unlock the page is not waiting on.
+        if user == SECOND_SPACE {
+            continue;
+        }
         let protector = protector(user)?;
         match protector.lock {
             None => {
@@ -285,19 +322,26 @@ pub fn open_without_credential(service: &KeyMint) -> Result<Opening> {
             Some(lock) => closed.push(Closed { user, lock: lock.kind, made_up: made_up(user, &protector.id), why: None }),
         }
     }
-    Ok(Opening { mounted, closed: open_made_up(service, closed, &owner) })
+    at(4);
+    let closed = open_made_up(service, closed, &owner);
+    at(5);
+    Ok(Opening { mounted, closed })
 }
 
 /// Open the own files of `user` with what they typed at their screen lock
 /// and, where `user` is the owner, of each of `closed` whose credential
 /// the phone made up behind theirs; give those still closed.
 pub fn unlock(service: &KeyMint, closed: &[Closed], user: u32, credential: &[u8]) -> Result<Vec<Closed>> {
+    at(1);
     let note = open_user_files(service, user, Some(credential), None)?;
+    at(3);
     let rest = closed.iter().filter(|c| c.user != user).cloned().collect();
-    Ok(match user == OWNER {
+    let left = match user == OWNER {
         true => open_made_up(service, rest, &note),
         false => rest,
-    })
+    };
+    at(5);
+    Ok(left)
 }
 
 /// Open the own files of each of `closed` whose credential the phone made
@@ -440,6 +484,28 @@ fn protector(user: u32) -> Result<crate::user::Protector> {
             ),
         },
     };
+    let first = protector_at(&dir, &id)?;
+    // A phone whose weaver a recovery cannot reach keeps a second blob for the
+    // same user, bound to the bytes beside it, which the credential service
+    // alone opens: that one is taken instead, as the configuration says.
+    if matches!(first.bound, Bound::Weaver(_)) && !weaver_first() {
+        let other = ids.iter().find(|other| {
+            other.as_str() != id.as_str()
+                && dir.join(format!("{other}.secdis")).is_file()
+                && dir.join(format!("{other}.pwd")).is_file()
+        });
+        if let Some(other) = other {
+            let alt = protector_at(&dir, other.as_str())?;
+            if matches!(alt.bound, Bound::Secdiscardable(_)) {
+                return Ok(alt);
+            }
+        }
+    }
+    Ok(first)
+}
+
+/// What the blob `id` in `dir` keeps a user's secret behind, read as it lies.
+fn protector_at(dir: &Path, id: &str) -> Result<crate::user::Protector> {
     // A user who has set a screen lock has what the phone recorded about
     // it beside the blob; a user who has set none has nothing there.
     let recorded = dir.join(format!("{id}.pwd"));
@@ -461,9 +527,24 @@ fn protector(user: u32) -> Result<crate::user::Protector> {
     Ok(crate::user::Protector {
         blob: std::fs::read(dir.join(format!("{id}.spblob"))).with_context(|| format!("read the blob in {}", dir.display()))?,
         bound,
-        id,
+        id: id.to_string(),
         lock,
     })
+}
+
+/// Whether the weaver's own slots are used for a phone whose blobs are bound
+/// to it: said once by the program that read the configuration, before the
+/// data partition is opened.
+static WEAVER_FIRST: AtomicBool = AtomicBool::new(true);
+
+/// Says whether the weaver's own slots are used, as the phone's configuration
+/// asks. Left unsaid, they are.
+pub fn use_weaver_first(yes: bool) {
+    WEAVER_FIRST.store(yes, Ordering::Relaxed);
+}
+
+fn weaver_first() -> bool {
+    WEAVER_FIRST.load(Ordering::Relaxed)
 }
 
 /// Which of the secure world's slots a user's enrolments sit in. What the

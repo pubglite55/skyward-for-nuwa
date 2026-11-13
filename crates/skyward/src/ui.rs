@@ -1454,6 +1454,10 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
             app.set_fastboot(running, link);
             port_at = Instant::now();
         }
+        // While the data partition opens, the page shows how far it has come.
+        if matches!(app.state.data, Data::Opening) {
+            app.data_progress(skyward_crypto::data::progress());
+        }
         let panel = app.panel(now);
         let mut shown = false;
         if panel.is_some() {

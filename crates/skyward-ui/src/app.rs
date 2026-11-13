@@ -1674,6 +1674,9 @@ pub struct State {
     /// Where the data partition stands, and what is typed at the screen
     /// lock its users' own files wait on.
     pub data: Data,
+    /// How far opening the data partition has come, from 0 to 1, while it
+    /// opens.
+    pub opening: f32,
     pub code: String,
     /// What is typed in the search field.
     pub search: String,
@@ -1802,6 +1805,7 @@ impl Default for State {
             systems_work: None,
             system_notice: None,
             data: Data::Closed,
+            opening: 0.0,
             code: String::new(),
             search: String::new(),
             layer: Layer::Letters,
@@ -3283,6 +3287,18 @@ impl App {
     /// The data partition is open: every user's own files with it, or
     /// those of `waiting`, the user and the control their screen lock is
     /// answered with, still closed.
+    /// How far opening the data partition has come, from 0 to 1, while the
+    /// decrypt page waits on it.
+    pub fn data_progress(&mut self, progress: f32) {
+        if !matches!(self.state.data, Data::Opening) || (progress - self.state.opening).abs() < 0.01 {
+            return;
+        }
+        self.state.opening = progress;
+        if matches!(self.screen(), Screen::Decrypt) {
+            self.refresh();
+        }
+    }
+
     pub fn data_waiting(&mut self, waiting: Option<(u32, Keys)>) {
         self.state.data = match waiting {
             Some((user, keys)) => Data::Locked { user, keys, checking: false },
@@ -3546,6 +3562,7 @@ impl App {
     pub fn asked_opening(&mut self) {
         self.state.install = Install::Opening;
         self.state.data = Data::Opening;
+        self.state.opening = 0.0;
         self.refresh();
     }
 
@@ -5127,6 +5144,7 @@ impl App {
     /// Open the data partition, the decrypt page saying so meanwhile.
     fn open_data(&mut self) -> Vec<Effect> {
         self.state.data = Data::Opening;
+        self.state.opening = 0.0;
         self.refresh();
         vec![Effect::OpenData]
     }

@@ -39,6 +39,7 @@ impl Decryptor {
         }
         let (wake, signal) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
         let (tx, ended) = mpsc::channel();
+        data::restart();
         let thread = thread::Builder::new()
             .name("decrypt".into())
             .spawn(move || {
