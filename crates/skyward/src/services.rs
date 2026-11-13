@@ -1,4 +1,4 @@
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{bail, Context, Result};
 use procfs::process::{FDTarget, MMapPath, Process};
 use skyward_config::Service;
 use skyward_sys::ueventd;
@@ -41,26 +41,98 @@ const CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 pub fn start(services: &[Service], libraries: Option<&Path>) -> Result<()> {
     let known = ueventd::accounts(&ueventd::PASSWD_FILES.iter().chain(&ueventd::GROUP_FILES).copied().collect::<Vec<_>>());
     for s in services {
-        if !Path::new(&s.path).is_file() {
-            bail!("{} is missing; is its partition mounted?", s.path);
-        }
+        // A program the phone's system keeps elsewhere, or does not carry at
+        // all, is no reason for the recovery not to start: another system
+        // version is another layout, and a page that opens without a program
+        // can say why decryption failed where a phone that never starts
+        // cannot say anything.
+        let Some(path) = resolve(&s.path) else {
+            skyward_sys::kmsg(&format!("{} is not on this phone; it is left out", s.path))?;
+            continue;
+        };
         let mut s = s.clone();
+        if path != s.path {
+            skyward_sys::kmsg(&format!("{} is not here; {} stands in for it", s.path, path))?;
+            s.path = path;
+        }
         if let Some(dir) = libraries {
             s.libraries.push(dir.to_string_lossy().into_owned());
         }
-        let who = Credentials::of(&s, &known)?;
+        let who = match Credentials::of(&s, &known) {
+            Ok(who) => who,
+            Err(e) => {
+                skyward_sys::kmsg(&format!("{e:#}; it is left out"))?;
+                continue;
+            }
+        };
         if s.oneshot {
-            let status = command(&s, &who).status().with_context(|| format!("run {}", s.path))?;
-            ensure!(status.success(), "{} {} ended: {status}", s.path, s.args.join(" "));
-            skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
+            match command(&s, &who).status() {
+                Ok(status) if status.success() => skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?,
+                Ok(status) => skyward_sys::kmsg(&format!("{} {} ended: {status}", s.path, s.args.join(" ")))?,
+                Err(e) => skyward_sys::kmsg(&format!("{} could not be run: {e:#}", s.path))?,
+            }
             continue;
         }
         let waiting = s.clone();
         let name = Path::new(&s.path).file_name().map_or_else(|| s.path.clone(), |n| n.to_string_lossy().into_owned());
         thread::Builder::new().name(name).spawn(move || supervise(&s, &who)).context("start a supervising thread")?;
-        ready(&waiting)?;
+        // A program that never says it is ready still runs: what waits on it
+        // is told, and the pages that need it say what they could not do.
+        if let Err(e) = ready(&waiting) {
+            skyward_sys::kmsg(&format!("{e:#}"))?;
+        }
     }
     Ok(())
+}
+
+/// The path a program is at on this phone: the one the page names, or where
+/// the phones whose systems keep it elsewhere keep the same program. A
+/// phone's own system decides which of them it has, and how its system is
+/// built changes between versions and between the systems people put on a
+/// phone.
+fn resolve(path: &str) -> Option<String> {
+    if Path::new(path).is_file() {
+        return Some(path.to_string());
+    }
+    let name = Path::new(path).file_name()?.to_string_lossy().into_owned();
+    candidates(&name).iter().find(|at| Path::new(at).is_file()).map(|at| (*at).to_string())
+}
+
+/// Where a program of the key service's kind is kept on the phones that
+/// keep it elsewhere than this one does.
+fn candidates(name: &str) -> &'static [&'static str] {
+    if name.contains("keymint") {
+        &[
+            "/vendor/bin/hw/android.hardware.security.keymint-service-qti",
+            "/odm/bin/hw/android.hardware.security.keymint-service-qti",
+            "/vendor/bin/hw/android.hardware.keymint-service-qti",
+            "/system_ext/bin/hw/android.hardware.security.keymint-service-qti",
+        ]
+    } else if name.contains("gatekeeper") {
+        &[
+            "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti",
+            "/vendor/bin/hw/android.hardware.gatekeeper-service-qti",
+            "/odm/bin/hw/android.hardware.gatekeeper@1.0-service-qti",
+            "/vendor/bin/hw/android.hardware.gatekeeper@1.1-service-qti",
+            "/vendor/bin/hw/android.hardware.gatekeeper@1.2-service-qti",
+        ]
+    } else if name == "qseecomd" {
+        &["/vendor/bin/qseecomd", "/system/bin/qseecomd", "/odm/bin/qseecomd"]
+    } else if name == "hwservicemanager" {
+        &["/system/bin/hwservicemanager", "/mnt/system_ext/bin/hwservicemanager", "/system_ext/bin/hwservicemanager"]
+    } else if name.contains("hardware.boot@") {
+        &[
+            "/vendor/bin/hw/android.hardware.boot@1.2-service",
+            "/vendor/bin/hw/android.hardware.boot@1.1-service",
+            "/vendor/bin/hw/android.hardware.boot@1.0-service",
+        ]
+    } else if name == "touch_report" {
+        &["/odm/bin/touch_report", "/vendor/bin/touch_report"]
+    } else if name == "touchsensor" {
+        &["/odm/bin/touchsensor", "/vendor/bin/touchsensor"]
+    } else {
+        &[]
+    }
 }
 
 /// Who a program runs as and what of root's it keeps, as the phone's own
@@ -353,5 +425,24 @@ fn wait_for(pid: u32) -> Result<()> {
         if e.kind() != io::ErrorKind::Interrupted {
             return Err(e).context("wait on the pidfd");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_programs_another_system_keeps_elsewhere_are_looked_for_there() {
+        assert!(candidates("android.hardware.security.keymint-service-qti").iter().all(|at| at.contains("keymint")));
+        assert_eq!(candidates("qseecomd")[0], "/vendor/bin/qseecomd");
+        assert!(candidates("hwservicemanager").contains(&"/system/bin/hwservicemanager"));
+        assert!(candidates("android.hardware.gatekeeper@1.0-service-qti").iter().any(|at| at.ends_with("gatekeeper@1.2-service-qti")));
+        assert!(candidates("vendor.xiaomi.hardware.mikeybag-service").is_empty());
+    }
+
+    #[test]
+    fn a_path_that_is_there_is_the_one_used() {
+        assert_eq!(resolve("/bin/sh").as_deref(), Some("/bin/sh"));
     }
 }
