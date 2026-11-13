@@ -5176,6 +5176,10 @@ impl App {
                 }
             }
             Screen::Decrypt if matches!(self.state.data, Data::Closed | Data::Failed(_)) => self.open_data(),
+            // The files are what the page is about: the partition they are
+            // in is opened as the page opens, so that turning the switch
+            // needs nothing else.
+            Screen::Wireless if matches!(self.state.data, Data::Closed | Data::Failed(_)) => self.open_data(),
             // As the stock updater does, the page asks the update server as
             // it opens, once a network is joined and nothing has been heard.
             Screen::Update => {

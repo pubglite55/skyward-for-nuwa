@@ -1162,6 +1162,9 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // while their switch is on; the address the page gives follows the one
     // the phone has.
     let mut files: Option<skyward_net::serve::Server> = None;
+    // Whether the files are to be served as soon as the partition they are
+    // in is open: the switch may be turned before it is.
+    let mut files_wanted = false;
     let mut files_at = Instant::now();
     if app.state.file_transfer {
         match Transfer::start(cfg, &info, app.state.time_zone) {
@@ -1945,6 +1948,38 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                 app.set_traffic(t);
             }
         }
+        // The files are served once the partition they are in is open, and
+        // not before: there would be nothing to serve.
+        if files_wanted && files.is_none() && app.state.data.storage_open() {
+            match skyward_net::serve::Server::start(PathBuf::from(skyward_crypto::data::SDCARD)) {
+                Ok(server) => {
+                    let url = wireless_url(cfg, server.port());
+                    skyward_sys::kmsg(&format!(
+                        "the files in {} are served at {}",
+                        skyward_crypto::data::SDCARD,
+                        url.as_deref().unwrap_or("no address yet")
+                    ))?;
+                    files = Some(server);
+                    files_at = Instant::now();
+                    app.wireless_started(url);
+                }
+                Err(e) => {
+                    files_wanted = false;
+                    skyward_sys::kmsg(&format!("the files could not be served: {e:#}"))?;
+                    app.wireless_failed(&skyward_ui::fmt::wireless_failed(app.state.lang, &format!("{e:#}")), now);
+                }
+            }
+        }
+        // They go with the partition they are in: closed, the server stops
+        // and the switch springs back.
+        if files.is_some() && !app.state.data.storage_open() {
+            files_wanted = false;
+            if let Some(server) = files.take() {
+                drop(server);
+            }
+            skyward_sys::kmsg("the files are no longer served: the data partition is closed")?;
+            app.wireless_stopped();
+        }
         // The address a browser reaches the files by follows the one the
         // phone is given, and what the page says of the server follows what
         // it has answered.
@@ -2681,41 +2716,21 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         }
                     }
                     // The files in internal storage go to the network the
-                    // phone is on while the switch is on: only where the
-                    // partition they are in is open, since there would be
-                    // nothing to serve otherwise.
-                    Effect::Wireless(on) => match (on, files.take()) {
-                        (true, None) => {
-                            if !app.state.data.storage_open() {
-                                app.wireless_failed(skyward_ui::fmt::wireless_needs_data(app.state.lang), now);
-                                skyward_sys::kmsg("the files are not served: the data partition is closed")?;
-                            } else {
-                                match skyward_net::serve::Server::start(PathBuf::from(skyward_crypto::data::SDCARD)) {
-                                    Ok(server) => {
-                                        let url = wireless_url(cfg, server.port());
-                                        skyward_sys::kmsg(&format!(
-                                            "the files in {} are served at {}",
-                                            skyward_crypto::data::SDCARD,
-                                            url.as_deref().unwrap_or("no address yet")
-                                        ))?;
-                                        files = Some(server);
-                                        files_at = Instant::now();
-                                        app.wireless_started(url);
-                                    }
-                                    Err(e) => {
-                                        skyward_sys::kmsg(&format!("the files could not be served: {e:#}"))?;
-                                        app.wireless_failed(&skyward_ui::fmt::wireless_failed(app.state.lang, &format!("{e:#}")), now);
-                                    }
-                                }
+                    // phone is on while the switch is on. One turned on
+                    // before the partition they are in is open waits for it,
+                    // and the loop starts serving once it is.
+                    Effect::Wireless(on) => {
+                        if on {
+                            files_wanted = true;
+                        } else {
+                            files_wanted = false;
+                            if let Some(server) = files.take() {
+                                drop(server);
+                                skyward_sys::kmsg("the files are no longer served")?;
                             }
-                        }
-                        (false, Some(server)) => {
-                            drop(server);
-                            skyward_sys::kmsg("the files are no longer served")?;
                             app.wireless_stopped();
                         }
-                        (on, server) => unreachable!("the switch turned the files {on} while they were {}", server.is_some()),
-                    },
+                    }
                 }
             }
         }

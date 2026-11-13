@@ -3116,6 +3116,13 @@ pub fn wireless(cx: &Ctx) -> Frame {
             "When on, a device on the same network opens the address given here in a browser to see, take and put files in internal storage.",
         ]);
         y = widgets::footnote(&mut c, t, f, y, note);
+    } else if !s.data.storage_open() {
+        let note = l.pick([
+            "正在等待 data 分区打开：打开后会自动开始，无需再操作。",
+            "正在等待 data 分割區開啟：開啟後會自動開始，無需再操作。",
+            "Waiting for the data partition to open: it starts on its own once it does.",
+        ]);
+        y = widgets::footnote(&mut c, t, f, y, note);
     } else if let Some(url) = &s.wireless_url {
         let served = s.wireless_served.to_string();
         let rows = [

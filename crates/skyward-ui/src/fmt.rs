@@ -1437,16 +1437,6 @@ pub fn transfer_left_on(l: Lang, why: &str) -> String {
     tr!(l, "关闭文件传输失败：{why}", "關閉檔案傳輸失敗：{why}", "Couldn't turn off file transfer: {why}")
 }
 
-/// The files in internal storage are not open, so there is nothing to
-/// serve.
-pub fn wireless_needs_data(l: Lang) -> &'static str {
-    l.pick([
-        "先打开 data 分区，才能把其中的文件传输到网络。",
-        "先開啟 data 分割區，才能把其中的檔案傳輸到網路。",
-        "Open the data partition first: its files are what is served.",
-    ])
-}
-
 /// The server for the files did not start, as the system says why.
 pub fn wireless_failed(l: Lang, why: &str) -> String {
     tr!(l, "无法开启无线传输：{why}", "無法開啟無線傳輸：{why}", "Couldn't start wireless transfer: {why}")

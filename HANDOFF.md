@@ -294,7 +294,7 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `skyward-info` / `skyward-ui` / `skyward/src/ui.rs` | 开发构建（未设 `SKYWARD_VERSION`，版本显示 0.2.0）不再向 GitHub 查新版本，更新页写明「试验构建，不查找新版本」；此前会认为 `1.5` 比 `0.2.0` 新并可一键**降级**回 v1.5 |
 | `crates/skyward-crypto/src/data.rs`、`skyward-ui`、`skyward-config` | 借鉴 pudding：跳过第二空间用户 999（其凭据由主用户代持，二次解锁可能卡住）；解密分 5 步上报进度，解密页画进度条；新增 `[data] weaver_first`（默认 true）——绑定 weaver 的 blob 打不开时，可改用同目录凭据服务守护的 `.secdis`+`.pwd` blob |
 | `crates/skyward/src/wlan.rs`、`skyward-config`、`devices/nuwa.toml` | WLAN 固件里的校准文件（persist 的 `kiwi_v2/wlan_mac.bin`）标为「可选」：缺失时**在内存里按序列号派生一个本地管理地址**写到 `/etc/firmware`（不写 persist），记日志后继续启动。此前 persist 被清过的机器会一直报「无法开启 WLAN」 |
-| `crates/skyward-net/src/serve.rs`（新）、`iface.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「无线传输」（借鉴 pudding）：设置 → 网络 → 无线传输，开启后在同一网段的浏览器打开 `http://<手机地址>:8080/` 即可列目录、下载（支持 `Range` 续传）与拖放上传（`PUT`，先写 `.part` 再改名，断线不留半截文件）。地址取自 WLAN 接口的真实地址并每 2 秒跟随；`..` 与指向目录外的符号链接一律 403；data 未打开时拒绝开启 |
+| `crates/skyward-net/src/serve.rs`（新）、`iface.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「无线传输」（借鉴 pudding）：设置 → 网络 → 无线传输，开启后在同一网段的浏览器打开 `http://<手机地址>:8080/` 即可列目录、下载（支持 `Range` 续传）与拖放上传（`PUT`，先写 `.part` 再改名，断线不留半截文件）。地址取自 WLAN 接口的真实地址并每 2 秒跟随；`..` 与指向目录外的符号链接一律 403；进入本页会顺带开始解密，data 未打开时开关处于「等待中」，分区打开后自动开始，data 一旦关闭就停 |
 
 新增单元测试 20 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 3、`wipe.rs` 1、`fsck.rs` 1、`serve.rs` 6、`skyward-ui` 2）。**验证进度**：推分支 ✅ → `build.yml` lint + test 绿 ✅ → 合并 `fork/main` ✅ → 第二轮改动待 CI → 打包刷机（待做）→ 真机进文件页确认解密后自动重列（待做）。
 
