@@ -19,6 +19,15 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 /// it can hold.
 const MOST: u64 = 512 * 1024;
 
+/// What the browser says it is when it asks for a page. A page that is told
+/// nothing of the browser asking often answers with a refusal, or with a page
+/// unlike the one a phone is shown, so a phone's own name is given.
+const AGENT: &str =
+    "Mozilla/5.0 (Linux; Android 15; 2210132C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36";
+
+/// The words a page is asked for in, the way a phone asks: Chinese first.
+const LANGUAGES: &str = "zh-CN,zh;q=0.9,en;q=0.8";
+
 /// How many of a page's pictures are taken, and how much of each: enough for
 /// the page to look like itself, and little enough to keep.
 const MOST_PICTURES: usize = 3;
@@ -68,7 +77,13 @@ fn fetch(url: &str, servers: http::Servers) -> Result<Read, String> {
         return Err("地址需以 http:// 或 https:// 开头".into());
     }
     let agent = http::agent(servers);
-    let mut answer = agent.get(url).call().map_err(|e| format!("{e}"))?;
+    let mut answer = agent
+        .get(url)
+        .header("user-agent", AGENT)
+        .header("accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
+        .header("accept-language", LANGUAGES)
+        .call()
+        .map_err(|e| format!("{e}"))?;
     let status = answer.status();
     if !status.is_success() {
         return Err(format!("服务器回了 {status}"));
@@ -112,7 +127,13 @@ fn fetch(url: &str, servers: http::Servers) -> Result<Read, String> {
 /// The PNG at `to`, where it is one and is no bigger than is kept: a picture
 /// of another kind is left out, as it cannot be drawn here.
 fn picture(agent: &ureq::Agent, to: &str) -> Option<Vec<u8>> {
-    let mut answer = agent.get(to).call().ok()?;
+    let mut answer = agent
+        .get(to)
+        .header("user-agent", AGENT)
+        .header("accept", "image/png,image/*;q=0.8")
+        .header("accept-language", LANGUAGES)
+        .call()
+        .ok()?;
     if !answer.status().is_success() {
         return None;
     }
