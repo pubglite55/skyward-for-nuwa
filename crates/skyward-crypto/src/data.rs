@@ -10,7 +10,7 @@ use crate::keystore::{StoredKey, Unwrap};
 use crate::token::Token;
 use crate::user::Bound;
 use crate::weaver::Weaver;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use skyward_binder::driver::Binder;
 use skyward_block::dm::Target;
 use skyward_block::fsck::Checked;
@@ -120,7 +120,7 @@ pub struct Opened {
 /// leaves no device behind.
 fn open(service: &KeyMint) -> Result<Opened> {
     let entries = skyward_block::fstab::read(MOUNT)?;
-    let Some(keyed) = encryption_entry(&entries)? else { return open_as_it_lies(&entries) };
+    let keyed = keyed_entry(&entries)?;
     let mapped = map(service, keyed)?;
     match mount_data(&entries, keyed, &mapped) {
         Ok((checked, filesystem)) => Ok(Opened { mapped, filesystem, checked }),
@@ -131,15 +131,33 @@ fn open(service: &KeyMint) -> Result<Opened> {
     }
 }
 
+/// The filesystems the probe can name: blkid's, and erofs, which the
+/// ramdisk reads with dump.erofs. A partition holding another is mounted as
+/// the phone's table says, without the probe to tell whether the key was the
+/// right one.
+const PROBED: [&str; 5] = ["f2fs", "ext4", "ext3", "ext2", "erofs"];
+
 /// Mount the partition at /data as the entry of the filesystem it holds
 /// says, after the check that entry asks for, and give how the check ended
 /// and the filesystem. `keyed` is the entry the key was found by, which is
 /// what a probe that names no filesystem falls back to.
 fn mount_data(entries: &[Entry], keyed: &Entry, device: &Path) -> Result<(Option<Checked>, String)> {
+    let holds = skyward_block::probe::filesystem(device)?;
+    // A mapping through which no filesystem reads was opened under another
+    // key than the one the partition was closed with. A filesystem the probe
+    // cannot name is mounted as the table says, and what mount answers is the
+    // answer.
+    ensure!(
+        holds.is_some() || !PROBED.contains(&keyed.filesystem.as_str()),
+        "no filesystem can be read through {}: the key it was opened with is not the one it was closed with",
+        device.display()
+    );
     // A phone that names the partition once per filesystem it might hold
     // mounts it with the entry of the one it holds.
-    let holds = skyward_block::probe::filesystem(device)?;
-    let entry = entries.iter().find(|e| holds.as_ref() == Some(&e.filesystem)).unwrap_or(keyed);
+    let entry = match &holds {
+        Some(held) => entries.iter().find(|e| &e.filesystem == held).unwrap_or(keyed),
+        None => keyed,
+    };
     let checked = match entry.extras.iter().any(|e| e == "check") {
         true => Some(skyward_block::fsck::check(device, &entry.filesystem)?),
         false => None,
@@ -149,20 +167,18 @@ fn mount_data(entries: &[Entry], keyed: &Entry, device: &Path) -> Result<(Option
     Ok((checked, entry.filesystem.clone()))
 }
 
-/// Mount a data partition the phone does not encrypt whole as it lies, the
-/// way its table mounts it, and give it as opened.
-fn open_as_it_lies(entries: &[Entry]) -> Result<Opened> {
-    let Some(first) = entries.first() else { bail!("the phone's own table says nothing about {MOUNT}") };
-    let mapped = PathBuf::from(skyward_block::fstab::device(first)?);
-    let (checked, filesystem) = mount_data(entries, first, &mapped)?;
-    Ok(Opened { mapped, filesystem, checked })
-}
-
 /// Map the data partition decrypted, under the key the phone keeps for it,
-/// and give the device the filesystem is read and written through.
+/// and give the device the filesystem is read and written through. A
+/// filesystem that reads off the partition as it lies says the partition is
+/// in the clear, whatever the table says of encrypting it: a table may keep
+/// the words after the system made the partition afresh without them.
 fn map(service: &KeyMint, entry: &Entry) -> Result<PathBuf> {
+    let device = PathBuf::from(skyward_block::fstab::device(entry)?);
+    let encrypts = entry.extra("metadata_encryption").is_some();
+    if !encrypts || skyward_block::probe::filesystem(&device)?.is_some() {
+        return Ok(device);
+    }
     let encryption = Encryption::of(entry)?;
-    let device = skyward_block::fstab::device(entry)?;
     let key = storage_key(service, entry, &encryption)?;
     let sectors = skyward_block::size_bytes(&device)? / 512;
     dm::create(MAPPED, &[target(&device, sectors, &key, &encryption)], false)
@@ -171,13 +187,14 @@ fn map(service: &KeyMint, entry: &Entry) -> Result<PathBuf> {
 /// The entry the key for the partition is found by: the one that says how
 /// the partition is encrypted whole. A phone may name the partition once per
 /// filesystem it might hold, and only the one it holds says so; the others
-/// are there for the filesystem that is not. None where no entry says it:
-/// the phone encrypts no part of the partition whole.
-fn encryption_entry(entries: &[Entry]) -> Result<Option<&Entry>> {
-    if entries.is_empty() {
-        bail!("the phone's own table says nothing about {MOUNT}");
+/// are there for the filesystem that is not. The first is given where no
+/// entry says it: the partition may be in the clear, which [`map`] tells by
+/// itself.
+fn keyed_entry(entries: &[Entry]) -> Result<&Entry> {
+    match skyward_block::fstab::encrypted(entries) {
+        Some(entry) => Ok(entry),
+        None => entries.first().with_context(|| format!("the phone's own table says nothing about {MOUNT}")),
     }
-    Ok(skyward_block::fstab::encrypted(entries))
 }
 
 /// Map the data partition decrypted without mounting it, for its
@@ -185,15 +202,9 @@ fn encryption_entry(entries: &[Entry]) -> Result<Option<&Entry>> {
 /// [`unmap`] takes it away again. The partition is to be closed. A
 /// partition the phone does not encrypt whole is given as it lies.
 pub fn map_unmounted(service: &KeyMint) -> Result<PathBuf> {
-    anyhow::ensure!(dm::status(MAPPED)?.is_none(), "the data partition is open");
+    ensure!(dm::status(MAPPED)?.is_none(), "the data partition is open");
     let entries = skyward_block::fstab::read(MOUNT)?;
-    match encryption_entry(&entries)? {
-        Some(entry) => map(service, entry),
-        None => match entries.first() {
-            Some(entry) => Ok(PathBuf::from(skyward_block::fstab::device(entry)?)),
-            None => bail!("the phone's own table says nothing about {MOUNT}"),
-        },
-    }
+    map(service, keyed_entry(&entries)?)
 }
 
 /// Take away the mapping [`map_unmounted`] made, where it made one.
@@ -683,14 +694,14 @@ mod tests {
         other.filesystem = "mifs".into();
         let encrypted = entry("latemount,metadata_encryption=adiantum,keydirectory=/metadata/vold/metadata_encryption");
         let both = [other, encrypted.clone()];
-        assert_eq!(encryption_entry(&both).unwrap(), Some(&encrypted), "the one that says it, not the first");
-        assert!(encryption_entry(&[]).is_err(), "a table with no entry for the partition at all");
+        assert_eq!(keyed_entry(&both).unwrap(), &encrypted, "the one that says it, not the first");
+        assert!(keyed_entry(&[]).is_err(), "a table with no entry for the partition at all");
     }
 
     #[test]
-    fn a_table_that_says_nothing_of_encryption_names_no_entry_to_find_a_key_by() {
+    fn a_table_that_says_nothing_of_encryption_names_the_first_entry() {
         let none = [entry("latemount,quota")];
-        assert_eq!(encryption_entry(&none).unwrap(), None, "the partition is mounted as it lies");
+        assert_eq!(keyed_entry(&none).unwrap(), &none[0], "the partition may be in the clear, which the map tells");
         let error = Encryption::of(&none[0]).unwrap_err();
         assert!(format!("{error:#}").contains("not encrypted whole"), "{error:#}");
     }

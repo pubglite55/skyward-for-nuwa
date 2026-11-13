@@ -288,7 +288,7 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward/src/main.rs` | 配置代为声明构建值时，不再要求 installed build.prop 必须提供同名属性 |
 | `crates/skyward-net/src/release.rs` | 校验 `version` 不可穿越镜像 URL 路径；无 code 且无 latest 的回答不再被当成「服务器说没有更新」 |
 | `crates/skyward-block/src/fstab.rs` | 解析改为只取前 5 列、容忍多余列（只有 4 列也接受）；此前多一列就整行丢弃，带 `metadata_encryption` 的 `/data` 行会凭空消失 |
-| `crates/skyward-crypto/src/data.rs` | 解密不再依赖某一份 fstab：条目按 `metadata_encryption` 选（`fstab::encrypted`，原来固定取第一条，同一挂载点多条时会选中不带该参数的那条并报「未整盘加密」）；探测不出文件系统时回落到该条目而非第一条；`keydirectory` 缺省按 fs_mgr 的 `/metadata/vold/metadata_encryption`；`wrappedkey_v0` 与 `v1` 及以后都按硬件包装处理，其它后缀明确报错；表里没有任何整盘加密条目时直接挂载原分区，不再要求 dm 映射 |
+| `crates/skyward-crypto/src/data.rs` | 解密不再依赖某一份 fstab：条目按 `metadata_encryption` 选（`fstab::encrypted`，原来固定取第一条，同一挂载点多条时会选中不带该参数的那条并报「未整盘加密」）；探测不出文件系统时回落到该条目而非第一条；`keydirectory` 缺省按 fs_mgr 的 `/metadata/vold/metadata_encryption`；`wrappedkey_v0` 与 `v1` 及以后都按硬件包装处理，其它后缀明确报错；表里没有任何整盘加密条目、或在原始分区上就能读出文件系统（说明分区是明文）时，直接挂载原分区；映射后读不出文件系统则明确报「密钥与分区不匹配」，不再退化成挂载错误 |
 | `crates/skyward/src/wipe.rs` | 恢复出厂改为按 `metadata_encryption` 取条目判断 `rebuilt`（原来固定第一条，可能误判为不可重建而拒绝）；显式 reformat 时改用目标文件系统那条条目的参数去建文件系统 |
 | `crates/skyward-block/src/fsck.rs` | 挂载前的检查补上 ext4 的 `e2fsck -p`（原来只支持 f2fs，data 为 ext4 的系统会直接失败） |
 | `skyward-info` / `skyward-ui` / `skyward/src/ui.rs` | 开发构建（未设 `SKYWARD_VERSION`，版本显示 0.2.0）不再向 GitHub 查新版本，更新页写明「试验构建，不查找新版本」；此前会认为 `1.5` 比 `0.2.0` 新并可一键**降级**回 v1.5 |
