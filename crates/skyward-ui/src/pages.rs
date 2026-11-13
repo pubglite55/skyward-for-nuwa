@@ -2945,6 +2945,24 @@ pub fn wlan(cx: &Ctx) -> Frame {
     let switch = widgets::list(&mut c, t, f, top, &[Row::new(l.pick(WLAN)).trail(Trail::Switch(on))]);
     out.extend(hits(&switch.rows, &[Action::Toggle(Switch::Wlan)]));
     let mut y = switch.bottom;
+    // Whether it is brought up by itself at the next start, and whether the
+    // password is kept, under the switch that turns it on.
+    let kept = widgets::list(
+        &mut c,
+        t,
+        f,
+        y + t.m.card_gap,
+        &[
+            Row::new(l.pick(["自动连接", "自動連線", "Connect by itself"]))
+                .subtitle(l.pick(["开机时开启 WLAN，并连接上次的网络", "開機時開啟 Wi-Fi，並連線上次的網路", "Turns Wi-Fi on at the next start and joins the network joined last"]))
+                .trail(Trail::Switch(s.wlan_auto)),
+            Row::new(l.pick(["记住密码", "記住密碼", "Keep the password"]))
+                .subtitle(l.pick(["记住上次连接的网络和密码", "記住上次連線的網路和密碼", "Keeps the network joined last and its password"]))
+                .trail(Trail::Switch(s.wlan_keep)),
+        ],
+    );
+    out.extend(hits(&kept.rows, &[Action::Toggle(Switch::WlanAuto), Action::Toggle(Switch::WlanKeep)]));
+    y = kept.bottom;
     match &w.power {
         Power::Off => {
             let note = l.pick([

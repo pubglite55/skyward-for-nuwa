@@ -52,6 +52,12 @@ pub struct Settings {
     /// The screen lock is kept, so that the next start opens the users' own
     /// files without asking for it.
     pub remember: bool,
+    /// The WLAN is brought up as the recovery starts, and joins the network
+    /// whose password is kept.
+    pub wlan_auto: bool,
+    /// The password of the network joined last is kept, so that the start
+    /// after this one joins it without asking.
+    pub wlan_keep: bool,
     pub install: Install,
     pub backup: Backup,
     pub logs: Logs,
@@ -151,6 +157,8 @@ impl Settings {
             vibration: state.vibration,
             file_transfer: state.file_transfer,
             remember: state.remember,
+            wlan_auto: state.wlan_auto,
+            wlan_keep: state.wlan_keep,
             install: Install { check_signature: state.check_signature, keep_recovery: state.keep_recovery },
             backup: Backup {
                 parts: names(&state.backup, &PARTS),
@@ -225,6 +233,8 @@ impl Settings {
             state.logs_to = at;
         }
         state.remember = self.remember;
+        state.wlan_auto = self.wlan_auto;
+        state.wlan_keep = self.wlan_keep;
         state.sort = SortKey::of(&self.sort.key).unwrap_or_default();
         state.sort_desc = self.sort.desc;
         state.folders_first = self.sort.folders;

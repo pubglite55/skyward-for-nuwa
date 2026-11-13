@@ -16,6 +16,7 @@ use crate::systems;
 use crate::updates;
 use crate::wipe::{self, Eraser, Step};
 use crate::wlan;
+use crate::wlanmem;
 use anyhow::{anyhow, ensure, Context, Result};
 use skyward_block::fsck::Fixed;
 use skyward_block::{fstab, mount, probe};
@@ -1005,6 +1006,63 @@ fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
     w.as_ref().context("the phone's WLAN is not brought up")
 }
 
+/// The network whose password is kept, and the password joined with on this
+/// run: once the WLAN is up and the scan has found it, the network kept is
+/// joined by itself; once a network takes the password joined with, that
+/// password is kept where the pages say to keep it; and one that refuses it
+/// has what was kept dropped.
+fn kept_network(
+    app: &App,
+    wlan: &Option<wlan::Worker>,
+    kept: &mut Option<wlanmem::Saved>,
+    joining: &mut Option<(Vec<u8>, String)>,
+) -> Result<()> {
+    let Some(state) = app.state.wlan.as_ref() else { return Ok(()) };
+    if let Some((ssid, password)) = joining.clone() {
+        let stage = state.joined.as_ref().filter(|j| j.ssid == ssid).map(|j| j.stage.clone());
+        match stage {
+            Some(Joining::Connected(_)) => {
+                // Kept where the pages say to keep it, unless what is on the
+                // file is this password already. The password stays in hand
+                // for the rest of the run, so that the switch, turned on
+                // later, keeps this network too.
+                if app.state.wlan_keep && kept.as_ref().is_none_or(|k| k.ssid != ssid || k.password != password) {
+                    wlanmem::save(&ssid, &password)?;
+                    *kept = Some(wlanmem::Saved { ssid, password });
+                }
+            }
+            Some(Joining::WrongPassword) => {
+                *joining = None;
+                if kept.as_ref().is_some_and(|k| k.ssid == ssid) {
+                    wlanmem::forget()?;
+                    *kept = None;
+                    skyward_sys::kmsg("the password kept was refused, so it is dropped")?;
+                }
+            }
+            Some(Joining::Failed) => *joining = None,
+            _ => {}
+        }
+    }
+    // The network kept, joined once the WLAN is up and the scan has found
+    // it: its security is the one the scan shows.
+    if let (Some(k), WlanPower::On, None) = (kept.as_ref(), &state.power, &state.joined) {
+        if let Some(n) = state.networks.iter().find(|n| n.ssid == k.ssid) {
+            if let Some(worker) = wlan {
+                skyward_sys::kmsg(&format!("joining {} with the password kept", n.name))?;
+                worker.send(wlan::Command::Join {
+                    ssid: n.ssid.clone(),
+                    name: n.name.clone(),
+                    security: n.security,
+                    password: k.password.clone(),
+                });
+                *joining = Some((n.ssid.clone(), k.password.clone()));
+                *kept = None;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The address the files served are reached by, where the phone has one:
 /// the address its WLAN interface was given.
 fn wireless_url(cfg: &DeviceConfig, port: u16) -> Option<String> {
@@ -1137,6 +1195,10 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // kept.
     let mut typed: Option<Vec<u8>> = None;
     let mut trying_kept = false;
+    // The network whose password is kept, joined as the WLAN comes up, and
+    // the password joined with on this run, kept once the network takes it.
+    let mut kept_wlan = wlanmem::read();
+    let mut joining_kept: Option<(Vec<u8>, String)> = None;
     skyward_sys::kmsg(&format!(
         "the pages speak {:?}, {}, and the locale named is {}",
         app.state.lang,
@@ -1410,6 +1472,13 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         }
         None => None,
     };
+    // The WLAN comes up by itself where the pages are set to have it, and
+    // joins the network whose password is kept once the scan finds it.
+    if app.state.wlan_auto {
+        if let Some(worker) = &wlan {
+            worker.send(wlan::Command::On);
+        }
+    }
     let mut scanned_at = Instant::now();
     app.state.update_server = cfg.update.is_some();
     // Asking the update server, and downloading the full package.
@@ -1977,6 +2046,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         if let Some((told, traffic)) = wlan.as_ref().map(wlan::Worker::told) {
             if let Some(w) = told {
                 app.set_wlan(w);
+                kept_network(&app, &wlan, &mut kept_wlan, &mut joining_kept)?;
             }
             if let Some(t) = traffic {
                 app.set_traffic(t);
@@ -2677,14 +2747,52 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         merger = Some(merge::Merger::start(slot, true)?);
                     }
                     Effect::Wlan(on) => wlan_worker(&wlan)?.send(if on { wlan::Command::On } else { wlan::Command::Off }),
+                    // The WLAN comes up by itself from the next start on; it
+                    // is brought up now too, so that the switch does something
+                    // at once, and the network kept is joined as it comes up.
+                    Effect::WlanAuto(on) => {
+                        if on {
+                            if app.state.wlan.as_ref().is_some_and(|w| matches!(w.power, WlanPower::Off | WlanPower::Failed(_))) {
+                                wlan_worker(&wlan)?.send(wlan::Command::On);
+                            }
+                            kept_wlan = wlanmem::read();
+                        }
+                    }
+                    // The password is kept from the next join on; turned off,
+                    // what was kept goes with it. A network joined already in
+                    // this run has its password still in hand, so turning the
+                    // switch on keeps that one at once.
+                    Effect::WlanKeep(on) => {
+                        if on {
+                            if let Some((ssid, password)) = &joining_kept {
+                                wlanmem::save(ssid, password)?;
+                                kept_wlan = Some(wlanmem::Saved { ssid: ssid.clone(), password: password.clone() });
+                            }
+                        } else {
+                            wlanmem::forget()?;
+                            kept_wlan = None;
+                            joining_kept = None;
+                        }
+                    }
                     Effect::ScanWlan => {
                         scanned_at = Instant::now();
                         wlan_worker(&wlan)?.send(wlan::Command::Scan);
                     }
                     Effect::JoinWlan { ssid, name, security, password } => {
-                        wlan_worker(&wlan)?.send(wlan::Command::Join { ssid, name, security, password: password.0 })
+                        // The password stays in hand for the rest of the run,
+                        // so that the switch that keeps it, turned on before
+                        // or after the network takes it, keeps this one.
+                        let secret = password.0;
+                        joining_kept = Some((ssid.clone(), secret.clone()));
+                        wlan_worker(&wlan)?.send(wlan::Command::Join { ssid, name, security, password: secret })
                     }
-                    Effect::LeaveWlan => wlan_worker(&wlan)?.send(wlan::Command::Leave),
+                    Effect::LeaveWlan => {
+                        // Left by hand, it is not joined again behind the
+                        // user's back; the file keeps it for the next start.
+                        kept_wlan = None;
+                        joining_kept = None;
+                        wlan_worker(&wlan)?.send(wlan::Command::Leave)
+                    }
                     // What the installed system is called is the page's to
                     // report when it cannot be read.
                     Effect::CheckUpdate => {

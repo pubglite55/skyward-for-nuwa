@@ -595,6 +595,10 @@ pub enum Switch {
     /// over.
     KeepRecovery,
     Wlan,
+    /// Bring the WLAN up as the recovery starts.
+    WlanAuto,
+    /// Keep the password of the network joined last.
+    WlanKeep,
     /// Show the password typed rather than a dot for each character.
     ShowPassword,
     /// Offer internal storage to the network the phone is on.
@@ -1744,6 +1748,11 @@ pub struct State {
     /// The screen lock is kept, so that the next start opens the users' own
     /// files without asking for it.
     pub remember: bool,
+    /// The WLAN is brought up as the recovery starts, and joins the network
+    /// whose password is kept.
+    pub wlan_auto: bool,
+    /// The password of the network joined last is kept.
+    pub wlan_keep: bool,
     /// A browser elsewhere on the network is offered the files in internal
     /// storage.
     pub wireless: bool,
@@ -1937,6 +1946,8 @@ impl Default for State {
             vibration: SLIDER_START,
             file_transfer: true,
             remember: false,
+            wlan_auto: false,
+            wlan_keep: false,
             // Offered to the network when it is asked for, and not before:
             // the files are the phone's own.
             wireless: false,
@@ -2306,6 +2317,10 @@ pub enum Effect {
     /// Turn the WLAN on or off; how it stands comes back with
     /// [`App::set_wlan`].
     Wlan(bool),
+    /// The WLAN is to be brought up as the recovery starts, or no longer.
+    WlanAuto(bool),
+    /// The password joined with is to be kept, or what was kept dropped.
+    WlanKeep(bool),
     ScanWlan,
     JoinWlan { ssid: Vec<u8>, name: String, security: Security, password: Secret },
     LeaveWlan,
@@ -5922,6 +5937,8 @@ impl App {
                     Switch::ShowPassword => &mut self.state.show_password,
                     Switch::Wireless => &mut self.state.wireless,
                     Switch::Remember => &mut self.state.remember,
+                    Switch::WlanAuto => &mut self.state.wlan_auto,
+                    Switch::WlanKeep => &mut self.state.wlan_keep,
                     Switch::Wlan => unreachable!("the WLAN switch is turned above"),
                     Switch::FoldersFirst => unreachable!("the folders-first switch puts the list in order above"),
                 };
@@ -5936,6 +5953,12 @@ impl App {
                 }
                 if switch == Switch::Remember {
                     return vec![Effect::Remember(now_on)];
+                }
+                if switch == Switch::WlanAuto {
+                    return vec![Effect::WlanAuto(now_on)];
+                }
+                if switch == Switch::WlanKeep {
+                    return vec![Effect::WlanKeep(now_on)];
                 }
             }
             Action::MountToggle(i) => {
