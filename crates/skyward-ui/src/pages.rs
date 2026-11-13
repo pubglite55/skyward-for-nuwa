@@ -1,5 +1,5 @@
 use crate::app::{
-    Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Fetch, Field, FileKind,
+    Action, BackupAt, BackupEnd, BackupJob, BrowseStatus, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Fetch, Field, FileKind,
     FileOp, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows, Screen,
     SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, SortKey, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe,
     ADDABLE,
@@ -23,6 +23,7 @@ use crate::widgets::{self, Cap, Caption, Detail, Fact, Outline, Row, Spec, Syste
 use skyward_info::{DeviceInfo, VERSION};
 use skyward_install::{Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::Progress;
+use skyward_net::html::Block;
 use skyward_net::supplicant::Security;
 use skyward_net::wlan::{Bands, Network, Power, Stage as Joining};
 use skyward_systems::Who;
@@ -113,6 +114,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Wireless => wireless(cx),
         Screen::Fetch => fetch(cx),
         Screen::Sort => sort(cx),
+        Screen::Browser => browser(cx),
     }
 }
 
@@ -2269,6 +2271,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Row::new(l.pick(UPDATE)).icon(GREEN, Icon::Layers).trail(Trail::Value(update_value(cx))),
         Row::new(l.pick(WIRELESS)).icon(GREEN, Icon::Wlan).trail(Trail::Value(wireless)),
         Row::new(l.pick(FETCH)).icon(BLUE, Icon::Globe),
+        Row::new(l.pick(BROWSER)).icon(PURPLE, Icon::Globe),
     ]);
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
@@ -2280,10 +2283,22 @@ pub fn advanced(cx: &Ctx) -> Frame {
         Action::Open(Screen::Update),
         Action::Open(Screen::Wireless),
         Action::Open(Screen::Fetch),
+        Action::Open(Screen::Browser),
     ]);
     Frame::new(t, fit(c, t, tools.bottom), out, l.pick(ADVANCED), top)
 }
 
+const BROWSER: Text = ["浏览器", "瀏覽器", "Browser"];
+const BROWSE_HINT: Text = ["输入网址，如 https://example.com", "輸入網址，如 https://example.com", "Type an address, such as https://example.com"];
+const BROWSE_OPEN: Text = ["打开", "打開", "Open"];
+const BROWSE_BACK: Text = ["上一页", "上一頁", "Back"];
+const BROWSE_RELOAD: Text = ["刷新", "重新整理", "Reload"];
+const BROWSE_LOADING: Text = ["正在读取…", "正在讀取…", "Reading…"];
+const BROWSE_EMPTY: Text = [
+    "这一页没有可显示的文字：它可能要脚本才能显示。",
+    "這一頁沒有可顯示的文字：它可能要腳本才能顯示。",
+    "This page holds no words to show: it may need its scripts to draw itself.",
+];
 const RELABEL: Text = ["修复 SELinux 上下文", "修復 SELinux 上下文", "Fix SELinux contexts"];
 const FILESYSTEMS: Text = ["文件系统", "檔案系統", "Filesystems"];
 const STOPPED: Text = ["已停止", "已停止", "Stopped"];
@@ -3327,6 +3342,139 @@ const STOP_FETCH: Text = ["停止下载", "停止下載", "Stop"];
 
 /// The order the file manager lists entries in: what they are put in order
 /// by, which way, and whether folders stand before files.
+/// A block of a page laid out: its lines, where they start on the page, and
+/// what they are.
+struct Placed {
+    lines: Vec<String>,
+    top: f32,
+    pitch: f32,
+    px: f32,
+    kind: Kind,
+}
+
+/// What a laid-out block is: a heading, words, a link to somewhere, or a
+/// note on how reading went.
+enum Kind {
+    Heading,
+    Words,
+    Link(String),
+    Note,
+}
+
+/// The recovery's own browser: the address it is at, the pages gone through,
+/// and what the page says in its markup — headings, paragraphs, and links a
+/// finger follows.
+pub fn browser(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let m = &t.m;
+    let b = &s.browser;
+    let top = m.content_top;
+    // Typing the address: the field and the keys, over nothing else.
+    if b.typing {
+        let mut c = page(cx);
+        let mut out = Vec::new();
+        let (y, caret) = widgets::text_field(&mut c, t, f, top, &b.url);
+        widgets::footnote(&mut c, t, f, y, l.pick(BROWSE_HINT));
+        keyboard_hits(&mut c, t, f, s, l.pick(BROWSE_OPEN), &mut out);
+        return Frame { caret: Some(caret), ..Frame::new(t, c, out, l.pick(BROWSER), top) };
+    }
+    // Reading: the address and the way back over it, then the page's words.
+    let x = m.title_x;
+    let max_w = m.w as f32 - x - m.title_x;
+    let mut rows = Vec::new();
+    let mut picks = Vec::new();
+    if !b.history.is_empty() {
+        rows.push(Row::new(l.pick(BROWSE_BACK)));
+        picks.push(Action::BrowseBack);
+    }
+    let shown = match b.at.is_empty() {
+        true => l.pick(BROWSE_HINT).to_string(),
+        false => b.at.clone(),
+    };
+    rows.push(Row::new(&shown).icon(BLUE, Icon::Globe));
+    picks.push(Action::BrowseEdit);
+    if !b.at.is_empty() {
+        rows.push(Row::new(l.pick(BROWSE_RELOAD)));
+        picks.push(Action::BrowseReload);
+    }
+    let rows_h = m.row_h * rows.len() as f32;
+    let mut y = top + rows_h + m.dp(8.0);
+    let measure = Canvas::new(2, 2);
+    let mut placed: Vec<Placed> = Vec::new();
+    // How reading stands, and what it came to.
+    let note = match &b.status {
+        BrowseStatus::Loading => Some(l.pick(BROWSE_LOADING).to_string()),
+        BrowseStatus::Failed(why) => Some(why.clone()),
+        _ => None,
+    };
+    if let Some(text) = note {
+        let lines = widgets::wrap(&measure, &f.body, &text, m.sub_px, max_w);
+        let h = lines.len() as f32 * m.sub_pitch;
+        placed.push(Placed { lines, top: y, pitch: m.sub_pitch, px: m.sub_px, kind: Kind::Note });
+        y += h;
+    }
+    if let Some(page) = &b.page {
+        let heading = &f.heading;
+        if !page.title.is_empty() {
+            y += m.dp(10.0);
+            let lines = widgets::wrap(&measure, heading, &page.title, m.dp(22.0), max_w);
+            let h = lines.len() as f32 * m.dp(28.0);
+            placed.push(Placed { lines, top: y, pitch: m.dp(28.0), px: m.dp(22.0), kind: Kind::Heading });
+            y += h;
+        }
+        for block in &page.blocks {
+            let (words, kind) = match block {
+                Block::Heading(words) => (words, Kind::Heading),
+                Block::Words(words) => (words, Kind::Words),
+                Block::Link { words, to } => (words, Kind::Link(to.clone())),
+            };
+            let (px, pitch, gap, face) = match kind {
+                Kind::Heading => (m.dp(20.0), m.dp(26.0), m.dp(12.0), heading),
+                _ => (m.sub_px, m.sub_pitch, m.dp(4.0), &f.body),
+            };
+            y += gap;
+            let lines = widgets::wrap(&measure, face, words, px, max_w);
+            if lines.is_empty() {
+                continue;
+            }
+            let h = lines.len() as f32 * pitch;
+            placed.push(Placed { lines, top: y, pitch, px, kind });
+            y += h;
+        }
+        if page.blocks.is_empty() && matches!(b.status, BrowseStatus::Shown) {
+            let text = l.pick(BROWSE_EMPTY);
+            let lines = widgets::wrap(&measure, &f.body, text, m.sub_px, max_w);
+            let h = lines.len() as f32 * m.sub_pitch;
+            placed.push(Placed { lines, top: y + m.dp(10.0), pitch: m.sub_pitch, px: m.sub_px, kind: Kind::Note });
+            y += h + m.dp(10.0);
+        }
+    }
+    let bottom = y + m.dp(10.0);
+    let mut c = sheet(cx, fitted(t, bottom), t.pal.bg);
+    let mut out = Vec::new();
+    let list = widgets::list(&mut c, t, f, top, &rows);
+    out.extend(hits(&list.rows, &picks));
+    for p in &placed {
+        let (face, ink) = match &p.kind {
+            Kind::Heading => (&f.heading, t.pal.text),
+            Kind::Words => (&f.body, t.pal.info),
+            Kind::Link(_) => (&f.body, t.pal.accent),
+            Kind::Note => (&f.body, t.pal.subtitle),
+        };
+        for (i, line) in p.lines.iter().enumerate() {
+            c.text_top(face, line, x, p.top + i as f32 * p.pitch, p.px, ink, None);
+        }
+        if let Kind::Link(to) = &p.kind {
+            let h = p.lines.len() as f32 * p.pitch;
+            out.push(Hit {
+                rect: Rect::new(x - m.dp(2.0), p.top - m.dp(2.0), max_w + m.dp(4.0), h + m.dp(4.0)),
+                action: Action::BrowseLink(to.clone()),
+            });
+        }
+    }
+    Frame::new(t, c, out, l.pick(BROWSER), top)
+}
+
 pub fn sort(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let mut c = long_page(cx);

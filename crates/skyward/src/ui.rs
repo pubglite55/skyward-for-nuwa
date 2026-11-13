@@ -1,4 +1,5 @@
 use crate::backup;
+use crate::browser;
 use crate::credential;
 use crate::decrypt::{self, Decryptor};
 use crate::filework;
@@ -1265,6 +1266,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // tried: a phone whose WLAN is not up yet is tried again while it shows.
     let mut portal: Option<portal::Portal> = None;
     let mut portal_tried: Option<Instant> = None;
+    // The page the browser asked for, being read on a thread of its own.
+    let mut page_reader: Option<browser::Fetcher> = None;
     if app.state.file_transfer {
         match Transfer::start(cfg, &info, app.state.time_zone) {
             Ok(t) => transfer = Some(t),
@@ -2105,6 +2108,12 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                 app.wireless_at(wireless_url(cfg, server.port()));
             }
             app.wireless_served(server.served());
+        }
+        // The page the browser asked for, if it has come since the last look.
+        let read = page_reader.as_ref().and_then(|f| f.taken());
+        if let Some(page) = read {
+            page_reader = None;
+            app.browsed(page);
         }
         // A link too long for the recovery's keyboard can be typed on
         // another device, which opens a page the phone serves: it runs while
@@ -3032,6 +3041,11 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         if let Some(worker) = &fetcher {
                             worker.stop();
                         }
+                    }
+                    // A page the browser asked for: read on its own thread,
+                    // and the page told when it has come.
+                    Effect::Browse(url) => {
+                        page_reader = Some(browser::Fetcher::start(url, servers.clone())?);
                     }
                     // A link a computer put in a file, taken from there: the
                     // first line that is not blank.

@@ -24,6 +24,7 @@ use skyward_info::DeviceInfo;
 use skyward_install::{Event, ImageKind, Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::{Failure, Progress};
 use skyward_net::github::{Build, Newest};
+use skyward_net::html::Page;
 use skyward_net::release::{Release, Unanswered};
 use skyward_net::supplicant::Security;
 use skyward_net::wlan::{Joined, Network, Power, Stage as Joining, Traffic, Wlan};
@@ -146,6 +147,9 @@ pub enum Screen {
     /// The order the file manager lists entries in: by what, which way,
     /// and whether folders stand first.
     Sort,
+    /// The recovery's own browser: an address, and what the page at it says
+    /// in its markup, its links a finger can follow.
+    Browser,
 }
 
 /// How far asking the update server for the newest system has come.
@@ -980,6 +984,37 @@ pub enum Fetch {
     Failed(String),
 }
 
+/// The recovery's own browser: the address it is at, the page it made of it,
+/// and the pages gone through to get here.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Browse {
+    /// What the address field holds, ready to be edited.
+    pub url: String,
+    /// The address the page shown came from.
+    pub at: String,
+    /// The page shown, where one has come.
+    pub page: Option<Page>,
+    pub status: BrowseStatus,
+    /// The addresses gone through before this one, the last last.
+    pub history: Vec<String>,
+    /// The address field is being typed in: the keys are up.
+    pub typing: bool,
+}
+
+/// How reading the page at an address stands.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum BrowseStatus {
+    /// Nothing asked for yet.
+    #[default]
+    Idle,
+    /// Asked for, and not come yet.
+    Loading,
+    /// Shown.
+    Shown,
+    /// It could not be read: why.
+    Failed(String),
+}
+
 /// How taking a file from an address ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FetchEnd {
@@ -1320,6 +1355,16 @@ pub enum Action {
     /// Take the address out of /sdcard/Download/link.txt, where a computer
     /// put it, and fill the page's field with it.
     FetchFromFile,
+    /// Read the address the browser's field holds.
+    BrowseGo,
+    /// Open the browser's address field again, the keys up.
+    BrowseEdit,
+    /// Follow a link to this address.
+    BrowseLink(String),
+    /// Back to the page before this one.
+    BrowseBack,
+    /// Read this page again.
+    BrowseReload,
     /// Put the file manager's entries in order by this.
     SortBy(SortKey),
     /// Turn that order round, or back.
@@ -1772,6 +1817,8 @@ pub struct State {
     /// The address the page another device types a link on is served at,
     /// while the download page shows and the phone has one.
     pub fetch_portal: Option<String>,
+    /// The recovery's own browser.
+    pub browser: Browse,
     /// The order the file manager lists a folder's entries in: what they
     /// are put in order by, whether the order is turned round, and whether
     /// folders stand before files.
@@ -1962,6 +2009,7 @@ impl Default for State {
             wireless_served: 0,
             fetch_url: String::new(),
             fetch_portal: None,
+            browser: Browse::default(),
             fetch: Fetch::Idle,
             // The stock file manager's own order to start with: folders
             // first, then by name.
@@ -2188,6 +2236,8 @@ pub enum Effect {
     StopFetch,
     /// Read /sdcard/Download/link.txt, where a computer put the address.
     FetchFromFile,
+    /// Read `url` and tell the browser page with [`App::browsed`].
+    Browse(String),
     /// Start receiving a package over USB.
     Sideload,
     /// Start installing the file at this path from the top of a place,
@@ -5492,6 +5542,56 @@ impl App {
         self.say(&why, now);
     }
 
+    /// Read the page at `url`, the pages gone through so far kept to go
+    /// back to. Nothing is asked of the network here: the runtime reads it
+    /// and tells [`App::browsed`].
+    fn browse_to(&mut self, url: String, now: u64) -> Vec<Effect> {
+        let url = url.trim().to_string();
+        if url.is_empty() {
+            self.say(self.state.lang.pick(["请输入网址", "請輸入網址", "Enter an address"]), now);
+            return Vec::new();
+        }
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            self.say(
+                self.state.lang.pick(["网址需以 http:// 或 https:// 开头", "網址需以 http:// 或 https:// 開頭", "An address starts with http:// or https://"]),
+                now,
+            );
+            return Vec::new();
+        }
+        let b = &mut self.state.browser;
+        // The page shown is the one gone back to, unless it is this one.
+        if !b.at.is_empty() && b.at != url {
+            b.history.push(b.at.clone());
+            if b.history.len() > 32 {
+                b.history.remove(0);
+            }
+        }
+        b.url = url.clone();
+        b.at = url.clone();
+        b.status = BrowseStatus::Loading;
+        b.page = None;
+        b.typing = false;
+        self.refresh();
+        vec![Effect::Browse(url)]
+    }
+
+    /// The page at the address asked for has come, or it has not: how it
+    /// went is what the browser shows.
+    pub fn browsed(&mut self, page: Result<Page, String>) {
+        let b = &mut self.state.browser;
+        match page {
+            Ok(page) => {
+                b.page = Some(page);
+                b.status = BrowseStatus::Shown;
+            }
+            Err(why) => {
+                b.page = None;
+                b.status = BrowseStatus::Failed(why);
+            }
+        }
+        self.refresh();
+    }
+
     fn say(&mut self, text: &str, now: u64) {
         self.toast = Some((text.to_string(), now + TOAST_MS));
         self.dirty = true;
@@ -5930,6 +6030,28 @@ impl App {
             Action::OpenData => return self.open_data(),
             Action::StopFetch => return vec![Effect::StopFetch],
             Action::FetchFromFile => return vec![Effect::FetchFromFile],
+            // The browser: its field is opened for typing, and what is
+            // typed in it, or a link, is read.
+            Action::BrowseEdit => {
+                self.state.browser.typing = true;
+                self.refresh();
+            }
+            Action::BrowseGo => {
+                let url = self.state.browser.url.clone();
+                return self.browse_to(url, now);
+            }
+            Action::BrowseLink(to) => return self.browse_to(to, now),
+            Action::BrowseBack => {
+                if let Some(back) = self.state.browser.history.pop() {
+                    return self.browse_to(back, now);
+                }
+            }
+            Action::BrowseReload => {
+                let url = self.state.browser.at.clone();
+                if !url.is_empty() {
+                    return self.browse_to(url, now);
+                }
+            }
             Action::Skip => {
                 self.leave(true);
                 if self.stack.len() > 1 {
@@ -6506,6 +6628,7 @@ impl App {
             Screen::Decrypt => &mut self.state.code,
             Screen::Rename => &mut self.state.new_name,
             Screen::Fetch => &mut self.state.fetch_url,
+            Screen::Browser => &mut self.state.browser.url,
             Screen::WlanPassword => &mut self.state.password,
             Screen::WlanAdd => {
                 let a = self.state.adding.as_mut().expect("the page adds a network");
@@ -6735,6 +6858,12 @@ impl App {
                         self.refresh();
                         return vec![Effect::StartFetch { url, name }];
                     }
+                }
+                // The address typed on the browser's field is read: the
+                // keyboard gives way to the page.
+                Screen::Browser => {
+                    let url = self.state.browser.url.clone();
+                    return self.browse_to(url, now);
                 }
                 // A password the network's protection cannot take is turned
                 // down here; one it can goes, and the WLAN page shows how
@@ -9055,6 +9184,37 @@ mod tests {
         app.fetch_started("b.zip");
         app.fetch_ended(FetchEnd::Failed("下载失败：the server answered 404".into()));
         assert!(matches!(app.state.fetch, Fetch::Failed(_)));
+    }
+
+    #[test]
+    fn the_browser_reads_the_address_it_is_given_and_goes_back_over_it() {
+        use skyward_net::html::Block;
+        let mut app = App::new(Screen::Browser, W, H, PPD);
+        app.state.browser.url = "https://example.com/a".into();
+        assert_eq!(app.act(Action::BrowseGo, 0), vec![Effect::Browse("https://example.com/a".into())]);
+        assert_eq!(app.state.browser.status, BrowseStatus::Loading);
+        assert!(!app.state.browser.typing, "the keys give way to the page");
+        app.browsed(Ok(Page { title: "示例".into(), blocks: vec![Block::Words("你好".into())] }));
+        assert_eq!(app.state.browser.status, BrowseStatus::Shown);
+        assert_eq!(app.state.browser.page.as_ref().map(|p| p.title.as_str()), Some("示例"));
+        // A link leads to the page it names, and back comes to this one.
+        assert_eq!(app.act(Action::BrowseLink("https://example.com/b".into()), 10), vec![Effect::Browse("https://example.com/b".into())]);
+        assert_eq!(app.state.browser.history, vec!["https://example.com/a".to_string()]);
+        assert_eq!(app.act(Action::BrowseBack, 20), vec![Effect::Browse("https://example.com/a".into())]);
+        assert_eq!(app.state.browser.history, vec!["https://example.com/b".to_string()], "the page gone back from is the one to go forward to");
+        // A page that could not be read says why, and none is shown.
+        app.browsed(Err("服务器回了 404".into()));
+        assert_eq!(app.state.browser.status, BrowseStatus::Failed("服务器回了 404".into()));
+        assert!(app.state.browser.page.is_none());
+    }
+
+    #[test]
+    fn an_address_that_is_not_a_web_one_is_turned_down() {
+        let mut app = App::new(Screen::Browser, W, H, PPD);
+        app.state.browser.url = "example.com".into();
+        assert!(app.act(Action::BrowseGo, 0).is_empty(), "nothing is read");
+        assert!(app.toast.is_some(), "and the page says why");
+        assert_eq!(app.state.browser.status, BrowseStatus::Idle);
     }
 
     #[test]
