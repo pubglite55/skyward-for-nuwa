@@ -590,15 +590,6 @@ pub enum Switch {
     Remember,
 }
 
-/// How long two taps may be apart to light the dark panel, and how far
-/// apart they may land.
-const TAP_MS: u64 = 600;
-const TAP_PX: f32 = 300.0;
-
-/// How far the lock screen's knob is slid before the page under it is let
-/// go.
-const LOCK_PULL: f32 = 0.75;
-
 /// What a backup can take, in the order the backup page lists it.
 pub const BACKUP_PARTS: [Text; 4] = [
     ["启动分区", "啟動分割區", "Boot partitions"],
@@ -2910,11 +2901,6 @@ pub struct App {
     /// rendered, the bar and its title stand as its scroll has them,
     /// without easing in or out.
     snap: bool,
-    /// A tap on the dark panel, and where it landed: two close together in
-    /// time and place light it.
-    tapped: Option<(u64, f32, f32)>,
-    /// Where the finger went down on the lock screen's knob.
-    lock_from: Option<f32>,
     /// The About page's moving field, while that page shows.
     glow: Option<GlowClock>,
     /// The terminal page's shell, from when it is first opened; it goes on
@@ -3007,8 +2993,6 @@ impl App {
             unsaved_warned: None,
             dither: None,
             toast: None,
-            tapped: None,
-            lock_from: None,
             drag: Drag::Idle,
             tracker: Tracker::default(),
             fling: None,
@@ -3184,7 +3168,7 @@ impl App {
         if let (true, Some(after)) = (self.display_on, SCREEN_OFF[self.state.screen_off]) {
             let idle = now.saturating_sub(active);
             if idle >= after {
-                self.sleep(now, true);
+                self.sleep(now);
             } else if idle >= after - dim_span(after) {
                 self.bright.set(false, now);
             }
@@ -3194,7 +3178,7 @@ impl App {
         if self.display_on && self.charging.as_ref().is_some_and(|c| c.shown.on && now >= c.since + CHARGE_MS) {
             let c = self.charging.as_mut().expect("the charging screen shows");
             if c.dark_after {
-                self.sleep(now, true);
+                self.sleep(now);
             } else {
                 c.shown.set(false, now);
             }
@@ -3383,7 +3367,6 @@ impl App {
             self.darkening = None;
             self.curtain.set(true, now);
         }
-        self.state.lock_pull = 0.0;
         self.woke_at = Some(now);
         self.stir(now);
     }
@@ -3442,17 +3425,10 @@ impl App {
     /// Turn the panel off: the content goes dark under the backlight it has
     /// now, then the panel goes off. A finger on the glass lets go of what
     /// it held, and the page stops where it is.
-    fn sleep(&mut self, now: u64, lock: bool) {
+    fn sleep(&mut self, now: u64) {
         self.darkening = self.panel(now);
         self.curtain.set(false, now);
         self.display_on = false;
-        // A panel that went dark on its own comes on with the lock screen; a
-        // power key press turns it off and on again without one.
-        // A phone whose touch panel did not come up has no knob to slide,
-        // so its page comes back as it was.
-        self.state.locked = lock && !self.keys;
-        self.state.lock_pull = 0.0;
-        self.refresh();
         self.bright = full_brightness();
         match std::mem::replace(&mut self.drag, Drag::Idle) {
             Drag::Confirm { .. } => {
@@ -4562,10 +4538,6 @@ impl App {
     /// while a cable has just gone in, both as dark as the content stands
     /// as the panel goes off or comes up.
     pub fn compose(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
-        if self.state.clock != clock {
-            self.state.clock.clear();
-            self.state.clock.push_str(clock);
-        }
         let charge = self.charging.as_ref().map_or(0.0, |c| c.shown.level(now));
         if charge < 1.0 {
             self.compose_page(out, f, info, clock, now);
@@ -6534,62 +6506,11 @@ impl App {
         Vec::new()
     }
 
-    /// The knob on the lock screen: it follows the finger to the right, and
-    /// a finger let go past [`LOCK_PULL`] of the way lets the page under the
-    /// lock screen be used again.
-    fn slide_lock(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
-        self.stir(now);
-        let reach = (self.w as f32 * 0.62).max(1.0);
-        match ev {
-            Touch::Down(x, _) => {
-                self.lock_from = Some(x);
-                if self.state.lock_pull != 0.0 {
-                    self.state.lock_pull = 0.0;
-                    self.refresh();
-                }
-            }
-            Touch::Move(x, _) => {
-                if let Some(from) = self.lock_from {
-                    let pull = ((x - from) / reach).clamp(0.0, 1.0);
-                    if (pull - self.state.lock_pull).abs() > 0.005 {
-                        self.state.lock_pull = pull;
-                        self.refresh();
-                    }
-                }
-            }
-            Touch::Up => {
-                let went = self.state.lock_pull >= LOCK_PULL;
-                self.lock_from = None;
-                self.state.lock_pull = 0.0;
-                if went {
-                    self.state.locked = false;
-                }
-                self.refresh();
-            }
-        }
-        Vec::new()
-    }
-
     pub fn touch(&mut self, ev: Touch, f: &Fonts, now: u64) -> Vec<Effect> {
-        // The dark panel: two taps close together in time and place light
-        // it, and it comes on with the lock screen over the page. One tap
-        // lights nothing, as on the phone's own system, and neither does a
-        // second tap far from the first.
+        // A finger on the dark panel lights nothing, as on the phone's own
+        // system, where the power key lights it.
         if !self.display_on {
-            if let Touch::Down(x, y) = ev {
-                let twice = self
-                    .tapped
-                    .is_some_and(|(at, tx, ty)| now < at + TAP_MS && (x - tx).abs() <= TAP_PX && (y - ty).abs() <= TAP_PX);
-                self.tapped = if twice { None } else { Some((now, x, y)) };
-                if twice {
-                    self.wake(now);
-                }
-            }
             return Vec::new();
-        }
-        // The lock screen takes every touch until its knob is slid home.
-        if self.state.locked {
-            return self.slide_lock(ev, now);
         }
         // A finger on the charging screen sends it away for the page, and
         // does nothing else until it lifts.
@@ -7005,7 +6926,7 @@ impl App {
                     // Turning the screen off, the key ticks the motor.
                     None => {
                         self.button = Some((key, Press::Spent));
-                        self.sleep(now, false);
+                        self.sleep(now);
                         return vec![Effect::Ticks];
                     }
                 }
@@ -7985,18 +7906,12 @@ mod tests {
         let mut app = App::new(Screen::Home, W, SNUG, PPD);
         let fr = app.frame(&f, &plain);
         let reboot = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Reboot)).expect("a reboot row").rect;
-        // The screen the page's rows fit on, measured from the page itself so
-        // that a row added to the page moves it too.
-        let snug = (reboot.y + reboot.h + 20.0).ceil() as u32;
-        let mut app = App::new(Screen::Home, W, snug, PPD);
-        let fr = app.frame(&f, &plain);
-        let reboot = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Reboot)).expect("a reboot row").rect;
-        assert!(reboot.y + reboot.h <= snug as f32, "without the notice the rows fit the screen");
+        assert!(reboot.y + reboot.h <= SNUG as f32, "without the notice the rows fit the screen");
         let i = DeviceInfo { snapshot: SnapshotState::Snapshotted, ..info() };
-        let mut app = App::new(Screen::Home, W, snug, PPD);
+        let mut app = App::new(Screen::Home, W, SNUG, PPD);
         let fr = app.frame(&f, &i);
         let reboot = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Reboot)).expect("a reboot row").rect;
-        assert!(reboot.y + reboot.h > snug as f32, "the notice pushes the last row below the screen");
+        assert!(reboot.y + reboot.h > SNUG as f32, "the notice pushes the last row below the screen");
         assert!(reboot.y + reboot.h <= fr.canvas.h as f32, "the page is drawn down to it");
         app.touch(Touch::Down(700.0, 2800.0), &f, 0);
         app.touch(Touch::Move(700.0, 2000.0), &f, 0);
@@ -10525,30 +10440,6 @@ mod tests {
         first.arrive();
         tap(&mut first, &f, &i, Action::Skip);
         assert_eq!((first.screen(), first.stack.len()), (Screen::Home, 1), "a recovery that started on the page goes on to the home page");
-    }
-
-    #[test]
-    fn the_dark_panel_lights_on_a_double_tap_and_the_lock_screen_lets_it_go() {
-        let (f, _i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
-        app.sleep(1000, true);
-        assert!(!app.display_on(), "the panel is dark");
-        app.touch(Touch::Down(100.0, 300.0), &f, 1000);
-        assert!(!app.display_on(), "one tap lights nothing");
-        app.touch(Touch::Down(140.0, 320.0), &f, 1200);
-        assert!(app.display_on(), "two taps close together light it");
-        assert_eq!(app.screen(), Screen::Home, "the page under the lock screen is still the one it was");
-        assert!(app.state.locked, "and it comes on with the lock screen");
-        // A touch that is not slid home leaves the lock screen up.
-        app.touch(Touch::Down(100.0, 900.0), &f, 2000);
-        app.touch(Touch::Move(120.0, 900.0), &f, 2020);
-        app.touch(Touch::Up, &f, 2040);
-        assert!(app.state.locked, "a short slide lets nothing go");
-        // Slid home, the page under it is used again.
-        app.touch(Touch::Down(100.0, 900.0), &f, 3000);
-        app.touch(Touch::Move(100.0 + W as f32 * 0.55, 900.0), &f, 3050);
-        app.touch(Touch::Up, &f, 3100);
-        assert!(!app.state.locked, "slid home, the page under it is used again");
     }
 
     #[test]
