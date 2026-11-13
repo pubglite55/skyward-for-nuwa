@@ -1,5 +1,5 @@
 use crate::app::{
-    Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field, FileKind,
+    Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Fetch, Field, FileKind,
     FileOp, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows, Screen,
     SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe, ADDABLE,
     BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
@@ -110,6 +110,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::WlanNetwork => wlan_network(cx),
         Screen::WlanAdd => wlan_add(cx),
         Screen::Wireless => wireless(cx),
+        Screen::Fetch => fetch(cx),
     }
 }
 
@@ -388,8 +389,11 @@ pub fn settings(cx: &Ctx) -> Frame {
     y = widgets::footnote(&mut c, t, f, usb.bottom, note);
     y = widgets::section(&mut c, t, f, y, l.pick(["网络", "網路", "Network"]));
     let wireless_state = if s.wireless { l.pick(["开", "開", "On"]) } else { l.pick(["关", "關", "Off"]) };
-    let network = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(WIRELESS)).icon(GREEN, Icon::Wlan).trail(Trail::Value(wireless_state))]);
-    out.extend(hits(&network.rows, &[Action::Open(Screen::Wireless)]));
+    let network = widgets::list(&mut c, t, f, y, &[
+        Row::new(l.pick(WIRELESS)).icon(GREEN, Icon::Wlan).trail(Trail::Value(wireless_state)),
+        Row::new(l.pick(FETCH)).icon(BLUE, Icon::Globe),
+    ]);
+    out.extend(hits(&network.rows, &[Action::Open(Screen::Wireless), Action::Open(Screen::Fetch)]));
     y = network.bottom;
     y = widgets::section(&mut c, t, f, y, l.pick(["调试", "偵錯", "Debugging"]));
     let debug = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal)]);
@@ -3149,6 +3153,65 @@ pub fn wireless(cx: &Ctx) -> Frame {
 }
 
 const WIRELESS: Text = ["无线传输", "無線傳輸", "Wireless transfer"];
+
+/// A file taken from an address typed on the screen's keyboard, into the
+/// downloads folder: the address, how far it has come, and how it ended.
+pub fn fetch(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = page(cx);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    let (mut y, caret) = widgets::text_field(&mut c, t, f, top, &s.fetch_url);
+    let note = l.pick([
+        "以 http:// 或 https:// 开头，文件保存到内部存储的 Download 文件夹。",
+        "以 http:// 或 https:// 開頭，檔案儲存到內部儲存空間的 Download 資料夾。",
+        "It starts with http:// or https://, and is saved in Download in internal storage.",
+    ]);
+    y = widgets::footnote(&mut c, t, f, y, note);
+    match &s.fetch {
+        Fetch::Idle => {}
+        Fetch::Running { name, done, total, rate } => {
+            y = widgets::section(&mut c, t, f, y + t.m.dp(10.0), l.pick(["正在下载", "正在下載", "Downloading"]));
+            widgets::progress_bar(&mut c, t, t.m.margin, y + t.m.dp(2.0), t.m.w as f32 - t.m.margin * 2.0, share(*done, *total));
+            let (came, all, pace) = (fmt::file_size(*done), fmt::file_size(*total), fmt::file_size(*rate));
+            let how = tr!(l, "已下载 {came}，共 {all}", "已下載 {came}，共 {all}", "{came} of {all}");
+            let speed = tr!(l, "速度 {pace}/s", "速度 {pace}/s", "{pace}/s");
+            let rows = [
+                Row::new(name.as_str()).icon(BLUE, Icon::Folder).subtitle(&how).trail(Trail::Value(speed.as_str())),
+                Row::new(l.pick(["停止下载", "停止下載", "Stop downloading"])).tint(t.pal.danger).trail(Trail::None),
+            ];
+            let list = widgets::list(&mut c, t, f, y + t.m.dp(18.0), &rows);
+            out.extend(hits(&list.rows[1..], &[Action::StopFetch]));
+            y = list.bottom;
+        }
+        Fetch::Done { name } => {
+            let saved = l.pick([
+                "已保存到内部存储的 Download 文件夹",
+                "已儲存到內部儲存空間的 Download 資料夾",
+                "Saved in Download in internal storage",
+            ]);
+            let list = widgets::list(&mut c, t, f, y + t.m.dp(10.0), &[Row::new(name.as_str()).icon(GREEN, Icon::Folder).subtitle(saved).trail(Trail::None)]);
+            y = list.bottom;
+        }
+        Fetch::Stopped { name } => {
+            let kept = l.pick([
+                "已停止，已下载的部分会保留，再下载同一地址时接着下",
+                "已停止，已下載的部分會保留，再下載同一網址時接著下",
+                "Stopped: what came is kept, and the same address goes on from there.",
+            ]);
+            let list = widgets::list(&mut c, t, f, y + t.m.dp(10.0), &[Row::new(name.as_str()).icon(SLATE, Icon::Folder).subtitle(kept).trail(Trail::None)]);
+            y = list.bottom;
+        }
+        Fetch::Failed(why) => {
+            y = widgets::footnote(&mut c, t, f, y + t.m.dp(10.0), why);
+        }
+    }
+    keyboard_hits(&mut c, t, f, s, l.pick(START_FETCH), &mut out);
+    Frame { caret: Some(caret), ..Frame::new(t, c, out, l.pick(FETCH), top) }
+}
+
+const FETCH: Text = ["网络下载", "網路下載", "Download"];
+const START_FETCH: Text = ["下载", "下載", "Download"];
 
 /// The file manager, every entry of the folder shown, folders first.
 pub fn files(cx: &Ctx) -> Frame {

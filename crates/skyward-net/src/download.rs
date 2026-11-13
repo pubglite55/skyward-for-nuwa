@@ -18,6 +18,9 @@ const CHUNK: usize = 1 << 20;
 pub enum Sum {
     Md5(String),
     Sha256(String),
+    /// An address that says no digest, as a link typed by hand does not:
+    /// what comes is taken as it is.
+    None,
 }
 
 /// Where a package is downloaded to until it is whole and checked.
@@ -25,6 +28,66 @@ pub fn partial(path: &Path) -> PathBuf {
     let mut name = path.file_name().expect("a package has a name").to_os_string();
     name.push(".part");
     path.with_file_name(name)
+}
+
+/// The name a link's file goes by: what its address ends with, its percent
+/// signs read, and a name of its own where the address ends with none.
+pub fn name_from(url: &str) -> String {
+    let path = url.split(['?', '#']).next().unwrap_or("");
+    let last = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let name: String = percent_decode(last).chars().filter(|c| *c != '/' && *c != '\\' && !c.is_control()).collect();
+    match name.as_str() {
+        "" | "." | ".." => "download.bin".to_string(),
+        _ => name,
+    }
+}
+
+/// A name in `dir` no file has yet: the one asked for where it is free, and
+/// the same with a number after it otherwise.
+pub fn free_name(dir: &Path, name: &str) -> String {
+    if !dir.join(name).exists() {
+        return name.to_string();
+    }
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() => (stem, format!(".{extension}")),
+        _ => (name, String::new()),
+    };
+    for n in 2..1000 {
+        let candidate = format!("{stem} ({n}){extension}");
+        if !dir.join(&candidate).exists() {
+            return candidate;
+        }
+    }
+    format!("{stem} ({}){extension}", std::process::id())
+}
+
+/// What a percent-encoded part of an address says. A plus stays a plus:
+/// it stands for a space in a query, and for itself in a file's name.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(high), Some(low)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2])) {
+                out.push(high * 16 + low);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// How far a download has come.
@@ -130,13 +193,14 @@ fn hex(digest: &[u8]) -> String {
 /// middle sends it all again.
 pub fn fetch(agent: &ureq::Agent, url: &str, path: &Path, sum: &Sum, stop: &AtomicBool, progress: &mut dyn FnMut(Progress)) -> Result<()> {
     match sum {
-        Sum::Md5(hex) => fetch_as::<Md5>(agent, url, path, hex, stop, progress),
-        Sum::Sha256(hex) => fetch_as::<Sha256>(agent, url, path, hex, stop, progress),
+        Sum::Md5(hex) => fetch_as::<Md5>(agent, url, path, Some(hex), stop, progress),
+        Sum::Sha256(hex) => fetch_as::<Sha256>(agent, url, path, Some(hex), stop, progress),
+        Sum::None => fetch_as::<Sha256>(agent, url, path, None, stop, progress),
     }
 }
 
-/// [`fetch`], with the digest by `D` in hex.
-fn fetch_as<D: Digest>(agent: &ureq::Agent, url: &str, path: &Path, sum: &str, stop: &AtomicBool, progress: &mut dyn FnMut(Progress)) -> Result<()> {
+/// [`fetch`], with the digest by `D` in hex where one is checked.
+fn fetch_as<D: Digest>(agent: &ureq::Agent, url: &str, path: &Path, sum: Option<&str>, stop: &AtomicBool, progress: &mut dyn FnMut(Progress)) -> Result<()> {
     let part = partial(path);
     let dir = path.parent().context("a package's path is in a folder")?;
     fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
@@ -156,7 +220,12 @@ fn fetch_as<D: Digest>(agent: &ureq::Agent, url: &str, path: &Path, sum: &str, s
     if total - have > room {
         bail!(NoRoom { needed: total - have, free: room });
     }
-    let mut hash = hash_of::<D>(&mut file, have, stop, progress)?;
+    // What an earlier download left is read for its digest only where a
+    // digest is checked.
+    let mut hash = match sum {
+        Some(_) => Some(hash_of::<D>(&mut file, have, stop, progress)?),
+        None => None,
+    };
     if have < total {
         let mut asked = agent.get(url);
         if have > 0 {
@@ -169,7 +238,9 @@ fn fetch_as<D: Digest>(agent: &ureq::Agent, url: &str, path: &Path, sum: &str, s
                 if have > 0 {
                     file.set_len(0).with_context(|| format!("empty {}", part.display()))?;
                     have = 0;
-                    hash = D::new();
+                    if hash.is_some() {
+                        hash = Some(D::new());
+                    }
                 }
             }
             status => bail!(Refused(status)),
@@ -188,16 +259,21 @@ fn fetch_as<D: Digest>(agent: &ureq::Agent, url: &str, path: &Path, sum: &str, s
             }
             let n = n.min((total - done) as usize);
             file.write_all(&buf[..n]).with_context(|| format!("write {}", part.display()))?;
-            hash.update(&buf[..n]);
+            if let Some(hash) = hash.as_mut() {
+                hash.update(&buf[..n]);
+            }
             done += n as u64;
             progress(Progress::Downloading { done, total });
         }
         file.sync_all().with_context(|| format!("write {} through", part.display()))?;
     }
-    if hex(&hash.finalize()) != sum.to_lowercase() {
-        drop(file);
-        fs::remove_file(&part).with_context(|| format!("delete {}", part.display()))?;
-        bail!(Damaged);
+    if let Some(sum) = sum {
+        let got = hex(&hash.expect("a digest is kept where one is checked").finalize());
+        if got != sum.to_lowercase() {
+            drop(file);
+            fs::remove_file(&part).with_context(|| format!("delete {}", part.display()))?;
+            bail!(Damaged);
+        }
     }
     fs::rename(&part, path).with_context(|| format!("name {} {}", part.display(), path.display()))
 }
@@ -214,6 +290,32 @@ mod tests {
     #[test]
     fn a_part_is_named_after_its_package() {
         assert_eq!(partial(Path::new("/sdcard/downloaded_rom/a.zip")), Path::new("/sdcard/downloaded_rom/a.zip.part"));
+    }
+
+    #[test]
+    fn a_link_names_its_file_by_what_it_ends_with() {
+        assert_eq!(name_from("https://a.example/rom/lineage.zip"), "lineage.zip");
+        assert_eq!(name_from("https://a.example/rom/a%20b.zip?token=1"), "a b.zip", "the query stays out of the name");
+        assert_eq!(name_from("https://a.example/rom/a+b.zip"), "a+b.zip", "a plus is a plus in a name");
+        assert_eq!(name_from("https://a.example/rom/"), "download.bin", "an address ending with a slash names nothing");
+        assert_eq!(name_from("https://a.example"), "download.bin");
+        assert_eq!(name_from("https://a.example/rom/.."), "download.bin");
+    }
+
+    #[test]
+    fn a_name_taken_takes_a_number() {
+        let dir = std::env::temp_dir().join(format!("skyward-net-name-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(free_name(&dir, "a.zip"), "a.zip");
+        fs::write(dir.join("a.zip"), b"x").unwrap();
+        assert_eq!(free_name(&dir, "a.zip"), "a (2).zip");
+        fs::write(dir.join("a (2).zip"), b"x").unwrap();
+        assert_eq!(free_name(&dir, "a.zip"), "a (3).zip");
+        assert_eq!(free_name(&dir, "README"), "README", "a name with no ending of its own still goes in");
+        fs::write(dir.join("README"), b"x").unwrap();
+        assert_eq!(free_name(&dir, "README"), "README (2)");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

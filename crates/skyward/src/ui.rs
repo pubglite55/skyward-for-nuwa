@@ -35,8 +35,8 @@ use skyward_sys::sleep::{Sleeper, Slept};
 use skyward_sys::uevent;
 use skyward_systems::Who;
 use skyward_ui::app::{
-    App, Asked, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ClashChoice, Data, DownloadEnd, Effect, EraseStop, FileKind, FileOp,
-    FileRow, FileTask, FsAction, FsRow, Have, Held, ItemEnd, ItemState, JobEnd, Keys, MountFailure, Part, PartKind, PartStop, Place,
+    App, Asked, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ClashChoice, Data, DownloadEnd, Effect, EraseStop, FetchEnd, FileKind,
+    FileOp, FileRow, FileTask, FsAction, FsRow, Have, Held, ItemEnd, ItemState, JobEnd, Keys, MountFailure, Part, PartKind, PartStop, Place,
     RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, UsbDrive, UsbLink, Wipe, DATA_OPENING, DATA_PARTITION, DOWNLOADS,
     INSTALL_UNFINISHED, USB_DRIVE,
 };
@@ -1393,6 +1393,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // Asking GitHub for Skyward's newest release, and updating to it.
     let mut skyward_checker: Option<updates::Worker> = None;
     let mut skyward_updater: Option<updates::Worker> = None;
+    // Taking a file from an address typed on the download page.
+    let mut fetcher: Option<updates::Worker> = None;
     // The phone sleeps while its screen is off and nothing needs it awake.
     let sleeper = Sleeper::start()?;
     // A uevent may be a charger or a computer attached or taken away: the
@@ -2077,6 +2079,38 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         if asked {
             skyward_checker = None;
         }
+        let mut taken = false;
+        if let Some(worker) = &fetcher {
+            for ev in worker.events() {
+                match ev {
+                    updates::Event::Progress(progress, rate) => {
+                        let (done, total) = match progress {
+                            download::Progress::Checking { done, total } | download::Progress::Downloading { done, total } => (done, total),
+                        };
+                        app.fetch_progress(done, total, rate);
+                    }
+                    updates::Event::Ended(end) => {
+                        let end = match end {
+                            updates::End::Downloaded => FetchEnd::Done,
+                            updates::End::Stopped => FetchEnd::Stopped,
+                            updates::End::Failed(why) => FetchEnd::Failed(skyward_ui::fmt::download_failure(app.state.lang, &why)),
+                            updates::End::Updated(_) | updates::End::NotWritten(_) | updates::End::WriteFailed(..) => {
+                                unreachable!("a link's file is only downloaded")
+                            }
+                        };
+                        skyward_sys::kmsg(&format!("downloading from an address ended: {end:?}"))?;
+                        app.fetch_ended(end);
+                        taken = true;
+                    }
+                    updates::Event::Checked(_) | updates::Event::SkywardChecked(_) | updates::Event::Writing { .. } => {
+                        unreachable!("a link's file is only downloaded")
+                    }
+                }
+            }
+        }
+        if taken {
+            fetcher = None;
+        }
         let mut updated = false;
         if let Some(u) = &skyward_updater {
             for ev in u.events() {
@@ -2729,6 +2763,39 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                                 skyward_sys::kmsg("the files are no longer served")?;
                             }
                             app.wireless_stopped();
+                        }
+                    }
+                    // A file is taken from the address into the downloads
+                    // folder, under a name nothing there has yet, so that
+                    // nothing of the phone's own is written over.
+                    Effect::StartFetch { url, name } => {
+                        ensure!(fetcher.is_none(), "a download is under way");
+                        let dir = Path::new(skyward_crypto::data::SDCARD).join("Download");
+                        let made = fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()));
+                        let name = match &made {
+                            Ok(()) => download::free_name(&dir, &name),
+                            Err(_) => name,
+                        };
+                        let path = dir.join(&name);
+                        let started = made.and_then(|()| {
+                            skyward_sys::kmsg(&format!("downloading {url} to {}", path.display()))?;
+                            updates::Worker::start(updates::Task::FetchUrl { url, name: name.clone(), path }, servers.clone())
+                        });
+                        match started {
+                            Ok(worker) => {
+                                fetcher = Some(worker);
+                                app.fetch_started(&name);
+                            }
+                            Err(e) => {
+                                skyward_sys::kmsg(&format!("the file could not be downloaded: {e:#}"))?;
+                                let why = skyward_ui::fmt::download_failure(app.state.lang, &Failure::Other(format!("{e:#}")));
+                                app.fetch_ended(FetchEnd::Failed(why));
+                            }
+                        }
+                    }
+                    Effect::StopFetch => {
+                        if let Some(worker) = &fetcher {
+                            worker.stop();
                         }
                     }
                 }

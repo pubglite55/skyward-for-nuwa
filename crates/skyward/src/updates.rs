@@ -39,6 +39,9 @@ pub enum Task {
     /// Download `release`'s full package to `path`; `server` is asked again
     /// for where it is when the addresses it gave have run out.
     Download { server: String, installed: Installed, release: Release, path: PathBuf },
+    /// Take what `url` offers to `path`, under `name`, checking no digest:
+    /// an address typed by hand says none.
+    FetchUrl { url: String, name: String, path: PathBuf },
     /// Ask GitHub for Skyward's newest release and its zip for the phone
     /// `codename` names; where that fails, `probe` says whether the network
     /// is why.
@@ -146,6 +149,13 @@ impl Worker {
                         };
                         let sum = Sum::Md5(release.md5.clone());
                         let end = fetch(&servers, release.urls.clone(), &sum, &release.name, &path, &stopping, &using, &tell, &mut refused);
+                        tell(Event::Ended(end));
+                    }
+                    // A link says no digest, and no server is asked again
+                    // for where it is: the address is the address.
+                    Task::FetchUrl { url, name, path } => {
+                        let mut refused = |_a: &ureq::Agent| Again::Retry;
+                        let end = fetch(&servers, vec![url], &Sum::None, &name, &path, &stopping, &using, &tell, &mut refused);
                         tell(Event::Ended(end));
                     }
                     Task::CheckSkyward { probe, codename } => {

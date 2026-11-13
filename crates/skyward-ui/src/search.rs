@@ -78,6 +78,12 @@ pub const ENTRIES: &[Entry] = &[
         Screen::Wireless,
         &["wuxianchuanshu", "wxcs", "wireless", "http", "web"],
     ),
+    entry(
+        ["网络下载", "網路下載", "Download by link"],
+        SETTINGS,
+        Screen::Fetch,
+        &["wangluoxiazai", "wlxz", "wangzhi", "wz", "download", "url", "lianjie"],
+    ),
     entry(["语言", "語言", "Language"], SETTINGS, Screen::Language, &["yuyan", "yy", "language", "fanti", "jianti", "english"]),
     entry(["时区", "時區", "Time zone"], SETTINGS, Screen::TimeZone, &["shiqu", "sq", "timezone"]),
     entry(["重启", "重新啟動", "Reboot"], HOME, Screen::Reboot, &["chongqi", "cq", "reboot", "fastboot", "bootloader", "edl", "guanji"]),

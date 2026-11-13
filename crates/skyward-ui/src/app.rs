@@ -138,6 +138,9 @@ pub enum Screen {
     /// The files in internal storage offered to the network the phone is
     /// on, and the address a browser reaches them by.
     Wireless,
+    /// A file taken from an address typed on the screen's keyboard, into
+    /// the downloads folder, and how that goes.
+    Fetch,
 }
 
 /// How far asking the update server for the newest system has come.
@@ -851,6 +854,31 @@ impl Data {
     }
 }
 
+/// A file being taken from an address typed on the download page, and how
+/// that went.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Fetch {
+    /// Nothing asked for yet.
+    #[default]
+    Idle,
+    /// Coming down: how much of it, and how fast, in bytes a second.
+    Running { name: String, done: u64, total: u64, rate: u64 },
+    /// Saved to the downloads folder.
+    Done { name: String },
+    /// Stopped as asked, with what came kept to go on from.
+    Stopped { name: String },
+    /// It could not be taken whole: why.
+    Failed(String),
+}
+
+/// How taking a file from an address ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FetchEnd {
+    Done,
+    Stopped,
+    Failed(String),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Confirm {
     Reboot,
@@ -1178,6 +1206,8 @@ pub enum Action {
     Skip,
     /// Try opening the data partition again, after it did not open.
     OpenData,
+    /// Stop taking the file the download page is taking.
+    StopFetch,
     Back,
     Theme { dark: bool },
     Toggle(Switch),
@@ -1611,6 +1641,10 @@ pub struct State {
     pub wireless_url: Option<String>,
     /// How many requests the server has answered.
     pub wireless_served: u64,
+    /// The address the download page has typed, and the file coming from
+    /// it.
+    pub fetch_url: String,
+    pub fetch: Fetch,
     pub reboot: usize,
     /// What the wipe page has chosen, by place in [`WIPES`].
     pub wipe: [bool; WIPES.len()],
@@ -1790,6 +1824,8 @@ impl Default for State {
             wireless: false,
             wireless_url: None,
             wireless_served: 0,
+            fetch_url: String::new(),
+            fetch: Fetch::Idle,
             reboot: 0,
             wipe: [false; WIPES.len()],
             cache_partition: false,
@@ -1993,6 +2029,10 @@ pub enum Effect {
     /// Offer the files in internal storage to the network the phone is on,
     /// or stop.
     Wireless(bool),
+    /// Take the file `url` offers into the downloads folder under `name`.
+    StartFetch { url: String, name: String },
+    /// Stop taking it.
+    StopFetch,
     /// Start receiving a package over USB.
     Sideload,
     /// Start installing the file at this path from the top of a place,
@@ -4799,6 +4839,38 @@ impl App {
         self.say(why, now);
     }
 
+    /// The file from the address is coming down, under the name it goes by.
+    pub fn fetch_started(&mut self, name: &str) {
+        self.state.fetch = Fetch::Running { name: name.to_string(), done: 0, total: 0, rate: 0 };
+        self.refresh();
+    }
+
+    /// How far the download has come, and how fast, in bytes a second.
+    pub fn fetch_progress(&mut self, done: u64, total: u64, rate: u64) {
+        if let Fetch::Running { name, .. } = &self.state.fetch {
+            let name = name.clone();
+            self.state.fetch = Fetch::Running { name, done, total, rate };
+            self.refresh();
+        }
+    }
+
+    /// The download ended, as `end` says: the name it went by is kept for
+    /// the page to say where the file is.
+    pub fn fetch_ended(&mut self, end: FetchEnd) {
+        let name = match &self.state.fetch {
+            Fetch::Running { name, .. } => name.clone(),
+            _ => String::new(),
+        };
+        self.state.fetch = match end {
+            FetchEnd::Done if name.is_empty() => Fetch::Idle,
+            FetchEnd::Done => Fetch::Done { name },
+            FetchEnd::Stopped if name.is_empty() => Fetch::Idle,
+            FetchEnd::Stopped => Fetch::Stopped { name },
+            FetchEnd::Failed(why) => Fetch::Failed(why),
+        };
+        self.refresh();
+    }
+
     fn say(&mut self, text: &str, now: u64) {
         self.toast = Some((text.to_string(), now + TOAST_MS));
         self.dirty = true;
@@ -5235,6 +5307,7 @@ impl App {
                 return self.arrive_at(s);
             }
             Action::OpenData => return self.open_data(),
+            Action::StopFetch => return vec![Effect::StopFetch],
             Action::Skip => {
                 self.leave(true);
                 if self.stack.len() > 1 {
@@ -5789,6 +5862,7 @@ impl App {
             Screen::Search => &mut self.state.search,
             Screen::Decrypt => &mut self.state.code,
             Screen::Rename => &mut self.state.new_name,
+            Screen::Fetch => &mut self.state.fetch_url,
             Screen::WlanPassword => &mut self.state.password,
             Screen::WlanAdd => {
                 let a = self.state.adding.as_mut().expect("the page adds a network");
@@ -5996,6 +6070,27 @@ impl App {
                         _ if name == *current => return self.back(now),
                         _ if taken => self.say_taken(now),
                         _ => return vec![Effect::Rename { path: self.entry_path(), name }],
+                    }
+                }
+                // An address that is not one is turned down here, in the
+                // user's words; one that is starts the download, and the
+                // page follows it.
+                Screen::Fetch => {
+                    let url = self.state.fetch_url.trim().to_string();
+                    if url.is_empty() {
+                        self.say(l.pick(["请输入网址", "請輸入網址", "Enter an address"]), now);
+                    } else if !(url.starts_with("http://") || url.starts_with("https://")) {
+                        self.say(
+                            l.pick(["网址需以 http:// 或 https:// 开头", "網址需以 http:// 或 https:// 開頭", "An address starts with http:// or https://"]),
+                            now,
+                        );
+                    } else if matches!(self.state.fetch, Fetch::Running { .. }) {
+                        self.say(l.pick(["正在下载，请先停止", "正在下載，請先停止", "A download is under way. Stop it first."]), now);
+                    } else {
+                        let name = skyward_net::download::name_from(&url);
+                        self.state.fetch = Fetch::Running { name: name.clone(), done: 0, total: 0, rate: 0 };
+                        self.refresh();
+                        return vec![Effect::StartFetch { url, name }];
                     }
                 }
                 // A password the network's protection cannot take is turned
@@ -8226,6 +8321,26 @@ mod tests {
         app.wireless_stopped();
         assert!(!app.state.wireless, "the switch shows how it stands");
         assert_eq!(app.state.wireless_url, None, "and the address goes with it");
+    }
+
+    #[test]
+    fn a_download_says_where_it_stands() {
+        let mut app = App::new(Screen::Fetch, W, H, PPD);
+        assert_eq!(app.state.fetch, Fetch::Idle);
+        app.fetch_started("lineage.zip");
+        app.fetch_progress(5, 10, 1024);
+        assert_eq!(app.state.fetch, Fetch::Running { name: "lineage.zip".into(), done: 5, total: 10, rate: 1024 });
+        app.fetch_ended(FetchEnd::Done);
+        assert_eq!(app.state.fetch, Fetch::Done { name: "lineage.zip".into() }, "the page says what it is called");
+
+        app.fetch_started("a.zip");
+        app.fetch_progress(1, 4, 0);
+        app.fetch_ended(FetchEnd::Stopped);
+        assert_eq!(app.state.fetch, Fetch::Stopped { name: "a.zip".into() }, "what came is kept to go on from");
+
+        app.fetch_started("b.zip");
+        app.fetch_ended(FetchEnd::Failed("下载失败：the server answered 404".into()));
+        assert!(matches!(app.state.fetch, Fetch::Failed(_)));
     }
 
     #[test]
