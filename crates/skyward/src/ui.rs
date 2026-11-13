@@ -1457,12 +1457,19 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         h.ticks()?;
                     }
                 }
+                // A screenshot the control centre asked for, taken once its
+                // sheet has gone and the page under it has been drawn.
+                Effect::Screenshot { storage } => {
+                    let saved = save_screenshot(&screen, storage, app.state.time_zone).map_err(|e| format!("{e:#}"));
+                    app.screenshot_saved(saved, now);
+                }
                 other => unreachable!("time passing asks for nothing but the motor, not {other:?}"),
             }
         }
         let time = clock(app.state.time_zone)?;
         if time != shown_clock {
             shown_clock = time;
+            app.set_date(skyward_ui::fmt::date(app.state.lang, unix_now()?, app.state.time_zone));
             app.redraw();
         }
         for reading in readings.taken() {
