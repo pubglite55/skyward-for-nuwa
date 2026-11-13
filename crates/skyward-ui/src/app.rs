@@ -10415,9 +10415,10 @@ mod tests {
         assert_eq!(app.key(Key::Back, 0), vec![Effect::ReadDir("/".into())], "back climbs a folder");
         assert_eq!(app.screen(), Screen::Files);
         app.set_files("/".into(), Ok(vec![entry("vmlinux", FileKind::File), entry("init.rc", FileKind::File)]), LISTED);
-        assert_eq!(tap(&mut app, &f, &i, Action::OpenEntry(1)), vec![Effect::OpenText("/init.rc".into())], "a text file opens to edit");
+        // Listed by name whatever case, init.rc comes first.
+        assert_eq!(tap(&mut app, &f, &i, Action::OpenEntry(0)), vec![Effect::OpenText("/init.rc".into())], "a text file opens to edit");
         assert_eq!(app.screen(), Screen::Files);
-        tap(&mut app, &f, &i, Action::OpenEntry(0));
+        tap(&mut app, &f, &i, Action::OpenEntry(1));
         assert_eq!(app.screen(), Screen::FileInfo);
         assert_eq!(app.state.file.as_ref().map(|e| e.name.as_str()), Some("vmlinux"));
         app.key(Key::Back, 0);
@@ -10448,7 +10449,7 @@ mod tests {
         ];
         app.set_place(Place::Storage, String::new(), Ok(listed), LISTED);
         let shown: Vec<&str> = app.state.storage.entries.as_ref().expect("listed").iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(shown, ["Download", "OTA.ZIP", "boot.img"], "folders and what can be installed, hidden ones left out");
+        assert_eq!(shown, ["Download", "boot.img", "OTA.ZIP"], "folders and what can be installed, hidden ones left out, by name whatever case");
         assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::ReadPlace(Place::Storage, "Download".into())]);
         app.set_place(Place::Storage, "Download".into(), Ok(vec![entry("ota.zip", FileKind::File)]), LISTED);
         assert_eq!(tap(&mut app, &f, &i, Action::ChooseEntry(0)), vec![Effect::InstallFile(Place::Storage, "Download/ota.zip".into())]);
