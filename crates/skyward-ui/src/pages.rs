@@ -3182,7 +3182,6 @@ pub fn fetch(cx: &Ctx) -> Frame {
             ];
             let list = widgets::list(&mut c, t, f, y + t.m.dp(18.0), &rows);
             out.extend(hits(&list.rows[1..], &[Action::StopFetch]));
-            y = list.bottom;
         }
         Fetch::Done { name } => {
             let saved = l.pick([
@@ -3190,8 +3189,7 @@ pub fn fetch(cx: &Ctx) -> Frame {
                 "已儲存到內部儲存空間的 Download 資料夾",
                 "Saved in Download in internal storage",
             ]);
-            let list = widgets::list(&mut c, t, f, y + t.m.dp(10.0), &[Row::new(name.as_str()).icon(GREEN, Icon::Folder).subtitle(saved).trail(Trail::None)]);
-            y = list.bottom;
+            widgets::list(&mut c, t, f, y + t.m.dp(10.0), &[Row::new(name.as_str()).icon(GREEN, Icon::Folder).subtitle(saved).trail(Trail::None)]);
         }
         Fetch::Stopped { name } => {
             let kept = l.pick([
@@ -3199,11 +3197,10 @@ pub fn fetch(cx: &Ctx) -> Frame {
                 "已停止，已下載的部分會保留，再下載同一網址時接著下",
                 "Stopped: what came is kept, and the same address goes on from there.",
             ]);
-            let list = widgets::list(&mut c, t, f, y + t.m.dp(10.0), &[Row::new(name.as_str()).icon(SLATE, Icon::Folder).subtitle(kept).trail(Trail::None)]);
-            y = list.bottom;
+            widgets::list(&mut c, t, f, y + t.m.dp(10.0), &[Row::new(name.as_str()).icon(SLATE, Icon::Folder).subtitle(kept).trail(Trail::None)]);
         }
         Fetch::Failed(why) => {
-            y = widgets::footnote(&mut c, t, f, y + t.m.dp(10.0), why);
+            widgets::footnote(&mut c, t, f, y + t.m.dp(10.0), why);
         }
     }
     keyboard_hits(&mut c, t, f, s, l.pick(START_FETCH), &mut out);
