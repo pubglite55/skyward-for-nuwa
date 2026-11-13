@@ -9291,8 +9291,11 @@ mod tests {
         press(&mut app, Key::VolumeDown, 0);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Install))));
         press(&mut app, Key::VolumeUp, 0);
+        assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Files))));
+        press(&mut app, Key::VolumeUp, 0);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::About))));
         press(&mut app, Key::VolumeUp, 0);
+        assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Search))), "the search bar is above the card");
         press(&mut app, Key::VolumeUp, 0);
         assert_eq!(lit(&mut app, &f, &i), Some(Stop::Hit(Action::Open(Screen::Reboot))), "up from the first goes round to the last");
         app.tick(5000);
