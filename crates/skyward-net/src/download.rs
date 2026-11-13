@@ -34,7 +34,16 @@ pub fn partial(path: &Path) -> PathBuf {
 /// signs read, and a name of its own where the address ends with none.
 pub fn name_from(url: &str) -> String {
     let path = url.split(['?', '#']).next().unwrap_or("");
-    let last = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    // What follows the host: an address that ends at the host, or at a
+    // slash that closes a folder, names no file.
+    let after_host = match path.split_once("://") {
+        Some((_, rest)) => rest.find('/').map_or("", |at| &rest[at + 1..]),
+        None => path,
+    };
+    if after_host.is_empty() || after_host.ends_with('/') {
+        return "download.bin".to_string();
+    }
+    let last = after_host.rsplit('/').next().unwrap_or("");
     let name: String = percent_decode(last).chars().filter(|c| *c != '/' && *c != '\\' && !c.is_control()).collect();
     match name.as_str() {
         "" | "." | ".." => "download.bin".to_string(),
