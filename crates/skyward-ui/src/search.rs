@@ -84,6 +84,12 @@ pub const ENTRIES: &[Entry] = &[
         Screen::Fetch,
         &["wangluowangzhi", "lianjie", "download", "url", "https"],
     ),
+    entry(
+        ["文件排序", "檔案排序", "File order"],
+        ADVANCED,
+        Screen::Sort,
+        &["wenjianpaixu", "wjpx", "paixu", "px", "sort", "order"],
+    ),
     entry(["语言", "語言", "Language"], SETTINGS, Screen::Language, &["yuyan", "yy", "language", "fanti", "jianti", "english"]),
     entry(["时区", "時區", "Time zone"], SETTINGS, Screen::TimeZone, &["shiqu", "sq", "timezone"]),
     entry(["重启", "重新啟動", "Reboot"], HOME, Screen::Reboot, &["chongqi", "cq", "reboot", "fastboot", "bootloader", "edl", "guanji"]),

@@ -28,6 +28,7 @@ use skyward_net::supplicant::Security;
 use skyward_net::wlan::{Joined, Network, Power, Stage as Joining, Traffic, Wlan};
 use skyward_systems::{Overview, Who};
 use skyward_vab::{BootSlots, Hold, Slot, SnapshotState, Standing};
+use std::cmp::Ordering;
 
 /// The pages of the recovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +142,9 @@ pub enum Screen {
     /// A file taken from an address typed on the screen's keyboard, into
     /// the downloads folder, and how that goes.
     Fetch,
+    /// The order the file manager lists entries in: by what, which way,
+    /// and whether folders stand first.
+    Sort,
 }
 
 /// How far asking the update server for the newest system has come.
@@ -571,6 +575,8 @@ pub enum Switch {
     ShowPassword,
     /// Offer internal storage to the network the phone is on.
     Wireless,
+    /// Folders stand before files in the file manager's list.
+    FoldersFirst,
 }
 
 /// What a backup can take, in the order the backup page lists it.
@@ -697,6 +703,68 @@ pub enum FileKind {
     Link { target: String, folder: bool },
     /// A device, socket or pipe.
     Special,
+}
+
+/// What the file manager puts a folder's entries in order by.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortKey {
+    /// A to Z, whatever case.
+    #[default]
+    Name,
+    /// The smallest first.
+    Size,
+    /// The oldest first.
+    Modified,
+}
+
+impl SortKey {
+    /// The key as the settings file names it.
+    pub fn tag(self) -> &'static str {
+        match self {
+            SortKey::Name => "name",
+            SortKey::Size => "size",
+            SortKey::Modified => "modified",
+        }
+    }
+
+    /// The key `tag` names, where it names one.
+    pub fn of(tag: &str) -> Option<SortKey> {
+        match tag {
+            "name" => Some(SortKey::Name),
+            "size" => Some(SortKey::Size),
+            "modified" => Some(SortKey::Modified),
+            _ => None,
+        }
+    }
+}
+
+/// Whether `row` is a folder, or a link that leads to one: the entries
+/// that stand before the rest when folders do.
+fn is_folder(row: &FileRow) -> bool {
+    matches!(row.kind, FileKind::Folder { .. } | FileKind::Link { folder: true, .. })
+}
+
+/// The order `a` and `b` stand in: by `key`, turned round where `desc`,
+/// with folders first where `folders`, and by name where the key does not
+/// tell them apart.
+fn ordered(a: &FileRow, b: &FileRow, key: SortKey, desc: bool, folders: bool) -> Ordering {
+    if folders {
+        match (is_folder(a), is_folder(b)) {
+            (true, false) => return Ordering::Less,
+            (false, true) => return Ordering::Greater,
+            _ => {}
+        }
+    }
+    let by_name = || a.name.to_lowercase().cmp(&b.name.to_lowercase());
+    let told = match key {
+        SortKey::Name => by_name(),
+        SortKey::Size => a.size.cmp(&b.size),
+        SortKey::Modified => a.modified.cmp(&b.modified),
+    };
+    match desc {
+        true => told.reverse().then_with(by_name),
+        false => told.then_with(by_name),
+    }
 }
 
 /// A folder as a list of its entries shows it: where it is, what is in it
@@ -1208,6 +1276,10 @@ pub enum Action {
     OpenData,
     /// Stop taking the file the download page is taking.
     StopFetch,
+    /// Put the file manager's entries in order by this.
+    SortBy(SortKey),
+    /// Turn that order round, or back.
+    SortDesc(bool),
     Back,
     Theme { dark: bool },
     Toggle(Switch),
@@ -1645,6 +1717,12 @@ pub struct State {
     /// it.
     pub fetch_url: String,
     pub fetch: Fetch,
+    /// The order the file manager lists a folder's entries in: what they
+    /// are put in order by, whether the order is turned round, and whether
+    /// folders stand before files.
+    pub sort: SortKey,
+    pub sort_desc: bool,
+    pub folders_first: bool,
     pub reboot: usize,
     /// What the wipe page has chosen, by place in [`WIPES`].
     pub wipe: [bool; WIPES.len()],
@@ -1826,6 +1904,11 @@ impl Default for State {
             wireless_served: 0,
             fetch_url: String::new(),
             fetch: Fetch::Idle,
+            // The stock file manager's own order to start with: folders
+            // first, then by name.
+            sort: SortKey::Name,
+            sort_desc: false,
+            folders_first: true,
             reboot: 0,
             wipe: [false; WIPES.len()],
             cache_partition: false,
@@ -4138,7 +4221,31 @@ impl App {
     /// `folder` becomes the one the list on page `screen` shows. A folder
     /// gone back up to shows where it was left, as the stock file manager
     /// does; any other starts from its top.
-    fn show_folder(&mut self, screen: Screen, folder: String, files: Result<Vec<FileRow>, String>, listed: i64) {
+    /// The order the file manager lists entries in, and the pages that
+    /// choose a file: by `key`, turned round where `desc`, with folders
+    /// first where `folders`. The folders shown are put in it at once.
+    pub fn set_sort(&mut self, key: SortKey, desc: bool, folders: bool) {
+        self.state.sort = key;
+        self.state.sort_desc = desc;
+        self.state.folders_first = folders;
+        for screen in [Screen::Files, Screen::Choose(Place::Storage), Screen::Choose(Place::UsbDrive)] {
+            if let Ok(entries) = &mut self.state.folder_mut(screen).entries {
+                entries.sort_by(|a, b| ordered(a, b, key, desc, folders));
+            }
+        }
+        self.refresh();
+    }
+
+    /// Put `entries` in the order the file manager is set to show them in.
+    fn arrange(&self, entries: &mut [FileRow]) {
+        let (key, desc, folders) = (self.state.sort, self.state.sort_desc, self.state.folders_first);
+        entries.sort_by(|a, b| ordered(a, b, key, desc, folders));
+    }
+
+    fn show_folder(&mut self, screen: Screen, folder: String, mut files: Result<Vec<FileRow>, String>, listed: i64) {
+        if let Ok(entries) = &mut files {
+            self.arrange(entries);
+        }
         let left = &self.state.folder(screen).path;
         if folder != *left && self.screen() == screen {
             // Climbing out of a folder, the keys come back to it; any other
@@ -5334,6 +5441,14 @@ impl App {
                 self.refresh();
                 return vec![Effect::Wlan(on)];
             }
+            // Folders standing first is the order itself, so the folder
+            // shown is put in it again at once.
+            Action::Toggle(Switch::FoldersFirst) => {
+                let folders = !self.state.folders_first;
+                self.set_sort(self.state.sort, self.state.sort_desc, folders);
+            }
+            Action::SortBy(key) => self.set_sort(key, self.state.sort_desc, self.state.folders_first),
+            Action::SortDesc(desc) => self.set_sort(self.state.sort, desc, self.state.folders_first),
             Action::Toggle(switch) => {
                 let on = match switch {
                     Switch::Vibrate => &mut self.state.vibrate,
@@ -5345,6 +5460,7 @@ impl App {
                     Switch::ShowPassword => &mut self.state.show_password,
                     Switch::Wireless => &mut self.state.wireless,
                     Switch::Wlan => unreachable!("the WLAN switch is turned above"),
+                    Switch::FoldersFirst => unreachable!("the folders-first switch puts the list in order above"),
                 };
                 *on = !*on;
                 let now_on = *on;
@@ -8341,6 +8457,35 @@ mod tests {
         app.fetch_started("b.zip");
         app.fetch_ended(FetchEnd::Failed("下载失败：the server answered 404".into()));
         assert!(matches!(app.state.fetch, Fetch::Failed(_)));
+    }
+
+    #[test]
+    fn the_file_list_takes_the_order_the_pages_choose() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Files, W, H, PPD);
+        let mut big = entry("big.bin", FileKind::File);
+        (big.size, big.modified) = (9_000, 1_700_000_100);
+        let mut small = entry("small.bin", FileKind::File);
+        (small.size, small.modified) = (10, 1_700_000_300);
+        let mut old = entry("old.txt", FileKind::File);
+        old.modified = 1_700_000_000;
+        let mut new = entry("new.txt", FileKind::File);
+        new.modified = 1_800_000_000;
+        let folder = entry("DCIM", FileKind::Folder { items: Some(2) });
+        app.set_files("/sdcard".into(), Ok(vec![big, small, old, new, folder]), LISTED);
+        let names = |app: &App| -> Vec<String> {
+            app.state.files.entries.as_ref().unwrap().iter().map(|e| e.name.clone()).collect()
+        };
+        assert_eq!(names(&app), ["DCIM", "big.bin", "new.txt", "old.txt", "small.bin"], "folders first, then by name");
+        app.set_sort(SortKey::Size, false, true);
+        assert_eq!(names(&app), ["DCIM", "small.bin", "new.txt", "old.txt", "big.bin"], "the smallest first, by name where equal");
+        app.set_sort(SortKey::Size, true, false);
+        assert_eq!(names(&app), ["big.bin", "DCIM", "new.txt", "old.txt", "small.bin"], "the largest first, folders among them");
+        app.set_sort(SortKey::Modified, true, true);
+        assert_eq!(names(&app), ["DCIM", "new.txt", "small.bin", "big.bin", "old.txt"], "the newest first");
+        // An entry listed later comes in in the order already asked for.
+        app.set_files("/sdcard".into(), Ok(vec![entry("A.txt", FileKind::File)]), LISTED);
+        assert_eq!(names(&app), ["A.txt"]);
     }
 
     #[test]

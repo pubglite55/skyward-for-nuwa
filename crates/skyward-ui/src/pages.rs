@@ -1,7 +1,8 @@
 use crate::app::{
     Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Fetch, Field, FileKind,
     FileOp, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows, Screen,
-    SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe, ADDABLE,
+    SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, SortKey, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe,
+    ADDABLE,
     BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
     USB_DRIVE_WANTED, WIPES, installs, starting,
 };
@@ -111,6 +112,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::WlanAdd => wlan_add(cx),
         Screen::Wireless => wireless(cx),
         Screen::Fetch => fetch(cx),
+        Screen::Sort => sort(cx),
     }
 }
 
@@ -2211,6 +2213,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
     let wireless = if s.wireless { l.pick(["开", "開", "On"]) } else { l.pick(["关", "關", "Off"]) };
     let tools = widgets::list(&mut c, t, f, top, &[
         Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
+        Row::new(l.pick(SORT)).icon(SLATE, Icon::Gear),
         Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal),
         Row::new(l.pick(RELABEL)).icon(PURPLE, Icon::Shield),
         Row::new(l.pick(FILESYSTEMS)).icon(RED, Icon::Mount),
@@ -2221,6 +2224,7 @@ pub fn advanced(cx: &Ctx) -> Frame {
     ]);
     let out = hits(&tools.rows, &[
         Action::Open(Screen::Files),
+        Action::Open(Screen::Sort),
         Action::Open(Screen::Terminal),
         Action::Open(Screen::Relabel),
         Action::Open(Screen::Filesystems),
@@ -3206,6 +3210,46 @@ pub fn fetch(cx: &Ctx) -> Frame {
 
 const FETCH: Text = ["网络下载", "網路下載", "Download"];
 const START_FETCH: Text = ["下载", "下載", "Download"];
+
+/// The order the file manager lists entries in: what they are put in order
+/// by, which way, and whether folders stand before files.
+pub fn sort(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+    let y = widgets::section_first(&mut c, t, f, top, l.pick(["排序方式", "排序方式", "Sort by"]));
+    let keys = widgets::list(&mut c, t, f, y, &[
+        Row::new(l.pick(SORT_NAME)).trail(Trail::Check(s.sort == SortKey::Name)),
+        Row::new(l.pick(SORT_SIZE)).trail(Trail::Check(s.sort == SortKey::Size)),
+        Row::new(l.pick(SORT_TIME)).trail(Trail::Check(s.sort == SortKey::Modified)),
+    ]);
+    out.extend(hits(&keys.rows, &[Action::SortBy(SortKey::Name), Action::SortBy(SortKey::Size), Action::SortBy(SortKey::Modified)]));
+    let y = widgets::section(&mut c, t, f, keys.bottom, l.pick(["顺序", "順序", "Order"]));
+    let order = widgets::list(&mut c, t, f, y, &[
+        Row::new(l.pick(SORT_ASC)).trail(Trail::Check(!s.sort_desc)),
+        Row::new(l.pick(SORT_DESC)).trail(Trail::Check(s.sort_desc)),
+    ]);
+    out.extend(hits(&order.rows, &[Action::SortDesc(false), Action::SortDesc(true)]));
+    let y = widgets::section(&mut c, t, f, order.bottom, l.pick(["文件夹", "資料夾", "Folders"]));
+    let folders = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(SORT_FOLDERS)).trail(Trail::Switch(s.folders_first))]);
+    out.extend(hits(&folders.rows, &[Action::Toggle(Switch::FoldersFirst)]));
+    let note = l.pick([
+        "文件管理器和「选择文件」的页面都按这个顺序排列，选择会被记住。",
+        "檔案管理員和「選擇檔案」的頁面都按這個順序排列，選擇會被記住。",
+        "The file manager and the pages that choose a file list entries in this order, and it is kept.",
+    ]);
+    let y = widgets::footnote(&mut c, t, f, folders.bottom, note);
+    Frame::new(t, fit(c, t, y), out, l.pick(SORT), top)
+}
+
+const SORT: Text = ["文件排序", "檔案排序", "File order"];
+const SORT_NAME: Text = ["名称", "名稱", "Name"];
+const SORT_SIZE: Text = ["大小", "大小", "Size"];
+const SORT_TIME: Text = ["修改时间", "修改時間", "Date modified"];
+const SORT_ASC: Text = ["升序", "升序", "Ascending"];
+const SORT_DESC: Text = ["降序", "降序", "Descending"];
+const SORT_FOLDERS: Text = ["文件夹置顶", "資料夾置頂", "Folders first"];
 
 /// The file manager, every entry of the folder shown, folders first.
 pub fn files(cx: &Ctx) -> Frame {

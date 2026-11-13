@@ -295,9 +295,10 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-crypto/src/data.rs`、`skyward-ui`、`skyward-config` | 借鉴 pudding：跳过第二空间用户 999（其凭据由主用户代持，二次解锁可能卡住）；解密分 5 步上报进度，解密页画进度条；新增 `[data] weaver_first`（默认 true）——绑定 weaver 的 blob 打不开时，可改用同目录凭据服务守护的 `.secdis`+`.pwd` blob |
 | `crates/skyward/src/wlan.rs`、`skyward-config`、`devices/nuwa.toml` | WLAN 固件里的校准文件（persist 的 `kiwi_v2/wlan_mac.bin`）标为「可选」：缺失时**在内存里按序列号派生一个本地管理地址**写到 `/etc/firmware`（不写 persist），记日志后继续启动。此前 persist 被清过的机器会一直报「无法开启 WLAN」 |
 | `crates/skyward-net/src/serve.rs`（新）、`iface.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「无线传输」（借鉴 pudding）：高级 → 无线传输，开启后在同一网段的浏览器打开 `http://<手机地址>:8080/` 即可列目录、下载（支持 `Range` 续传）与拖放上传（`PUT`，先写 `.part` 再改名，断线不留半截文件）。地址取自 WLAN 接口的真实地址并每 2 秒跟随；`..` 与指向目录外的符号链接一律 403；进入本页会顺带开始解密，data 未打开时开关处于「等待中」，分区打开后自动开始，data 一旦关闭就停 |
+| `crates/skyward-ui`（`app`/`settings`/`pages`/`search`） | 文件管理器排序：高级 → 文件排序，可按名称 / 大小 / 修改时间，升降序，文件夹置顶；排序在界面侧完成，改选即重排已打开的列表，选择写入设置文件（`sort`），下次启动保留 |
 | `crates/skyward-net/src/download.rs`、`crates/skyward/src/updates.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「网络下载」：高级 → 网络下载，输入 `http://` / `https://` 直链，按回车即下到内部存储 `Download/`；支持 `Range` 续传、可停止（已下部分保留，再下同一地址接着下）、同名文件自动加序号不覆盖。为此给下载层加了「无摘要」模式（`Sum::None`，手输地址不带校验值）与文件名推导（`name_from` / `free_name`） |
 
-新增单元测试 23 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 3、`wipe.rs` 1、`fsck.rs` 1、`serve.rs` 6、`download.rs` 2、`skyward-ui` 3）。**验证进度**：推分支 ✅ → `build.yml` lint + test 绿 ✅ → 合并 `fork/main` ✅ → 第二轮改动待 CI → 打包刷机（待做）→ 真机进文件页确认解密后自动重列（待做）。
+新增单元测试 24 个（`github.rs` 3、`image.rs` 1、`release.rs` 1、`fstab.rs` 2、`data.rs` 3、`wipe.rs` 1、`fsck.rs` 1、`serve.rs` 6、`download.rs` 2、`skyward-ui` 4）。**验证进度**：推分支 ✅ → `build.yml` lint + test 绿 ✅ → 合并 `fork/main` ✅ → 第二轮改动待 CI → 打包刷机（待做）→ 真机进文件页确认解密后自动重列（待做）。
 
 ---
 

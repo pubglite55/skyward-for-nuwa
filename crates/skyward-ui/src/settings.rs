@@ -5,7 +5,7 @@
 //! a time zone, a part or a place by its name, so a later version that lists
 //! them otherwise reads them the same.
 
-use crate::app::{Place, State, SCREEN_OFF, TIME_ZONES};
+use crate::app::{Place, SortKey, State, SCREEN_OFF, TIME_ZONES};
 use crate::Lang;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,27 @@ pub struct Settings {
     pub install: Install,
     pub backup: Backup,
     pub logs: Logs,
+    /// The order the file manager lists entries in.
+    pub sort: Sort,
+}
+
+/// The order the file manager lists entries in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Sort {
+    /// What the entries are put in order by: `name`, `size` or `modified`.
+    pub key: String,
+    /// Turned round: from Z to A, or the largest or newest first.
+    pub desc: bool,
+    /// Folders stand before files.
+    pub folders: bool,
+}
+
+impl Default for Sort {
+    /// The stock file manager's own order: folders first, then by name.
+    fn default() -> Self {
+        Sort { key: SortKey::Name.tag().to_string(), desc: false, folders: true }
+    }
 }
 
 /// The install page's options.
@@ -138,6 +159,7 @@ impl Settings {
                 verify: state.verify,
             },
             logs: Logs { kinds: names(&state.logs, &LOGS), to: LOG_PLACES[state.logs_to].to_string() },
+            sort: Sort { key: state.sort.tag().to_string(), desc: state.sort_desc, folders: state.folders_first },
         }
     }
 
@@ -198,6 +220,9 @@ impl Settings {
         if let Some(at) = LOG_PLACES.iter().position(|place| *place == self.logs.to) {
             state.logs_to = at;
         }
+        state.sort = SortKey::of(&self.sort.key).unwrap_or_default();
+        state.sort_desc = self.sort.desc;
+        state.folders_first = self.sort.folders;
     }
 }
 
@@ -316,6 +341,9 @@ mod tests {
             verify: false,
             logs: [false, true],
             logs_to: 1,
+            sort: SortKey::Modified,
+            sort_desc: true,
+            folders_first: false,
             ..State::default()
         };
         let kept = Settings::read(&Settings::of(&state).text()).unwrap();
