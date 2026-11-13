@@ -4517,7 +4517,7 @@ impl App {
     /// The lock over the page: the time in large type, the battery under it,
     /// and a knob to slide to the right along the foot of the screen.
     fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, drag: f32) {
-        let t = self.theme().clone();
+        let t = self.theme();
         let lang = self.state.lang;
         let m = &t.m;
         let (w, h) = (m.w as f32, m.h as f32);
