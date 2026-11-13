@@ -967,7 +967,10 @@ fn main() -> Result<()> {
         ("88-decrypt-light-checking", Screen::Decrypt, false, &|app| {
             app.state.data = Data::Locked { user: 0, keys: Keys::Digits, checking: true };
         }),
-        ("89-decrypt-light-open", Screen::Decrypt, false, &|app| app.data_waiting(None)),
+        ("89-decrypt-light-progress", Screen::Decrypt, false, &|app| {
+            app.state.data = Data::Opening;
+            app.data_progress(0.6);
+        }),
         ("90-decrypt-dark-failed", Screen::Decrypt, true, &|app| {
             app.data_failed("android.hardware.security.keymint.IKeyMintDevice/default is not running".into())
         }),
