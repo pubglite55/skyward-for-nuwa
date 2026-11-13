@@ -517,7 +517,7 @@ fn main() -> Result<()> {
             app.state.backup_job = job(false, plan(), Some(BackupAt { item: 11, done: 300_000_000, of: 1_420_455_936, checking: true }), None)
         }),
         ("103-backup-job-light-saved", Screen::BackupJob, false, &|app| {
-            app.state.backup_job = job(false, plan(), None, Some(BackupEnd::Saved("20261021-200110".into())))
+            app.state.backup_job = job(false, plan(), None, Some(BackupEnd::Saved { name: "20261021-200110".into(), skipped: 0 }))
         }),
         ("104-backup-job-light-room", Screen::BackupJob, false, &|app| {
             let room = BackupRefusal::Room { needed: 52_400_000_000, free: 31_200_000_000 };

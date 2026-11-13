@@ -2085,7 +2085,7 @@ fn part_state(l: Lang, job: &BackupJob, k: usize) -> String {
     let (did, doing) = job_words(job.restore);
     let ended = job.outcome.is_some();
     let a = match (&job.outcome, job.at) {
-        (Some(BackupEnd::Saved(_)), _) => return l.pick(if job.checks { VERIFIED } else { did }).to_string(),
+        (Some(BackupEnd::Saved { .. }), _) => return l.pick(if job.checks { VERIFIED } else { did }).to_string(),
         (Some(BackupEnd::Restored { .. }), _) => return l.pick(did).to_string(),
         (_, None) => return l.pick(if ended { ["未开始", "未開始", "Not started"] } else { WAITING_TURN }).to_string(),
         (_, Some(a)) => a,
@@ -2144,12 +2144,20 @@ pub fn backup_job(cx: &Ctx) -> Frame {
             let gone = l.pick(if job.restore { ["未写入任何内容。", "未寫入任何內容。", "Nothing was written."] } else { ["未保存任何备份。", "未儲存任何備份。", "No backup was saved."] });
             let failed = l.pick(if job.restore { RESTORE_FAILED } else { ["备份失败", "備份失敗", "Backup failed"] });
             let (title, color, detail) = match end {
-                BackupEnd::Saved(name) => {
+                BackupEnd::Saved { name, skipped } => {
                     let saved = match job.place {
                         Place::Storage => tr!(l, "已保存到内部存储的 Skyward/backups/{name}", "已儲存到內部儲存空間的 Skyward/backups/{name}", "Saved to Skyward/backups/{name} in internal storage"),
                         Place::UsbDrive => tr!(l, "已保存到 U 盘的 Skyward/backups/{name}", "已儲存到 USB 隨身碟的 Skyward/backups/{name}", "Saved to Skyward/backups/{name} on the USB drive"),
                     };
-                    (l.pick(BACKUP_COMPLETE), GREEN, saved)
+                    (l.pick(BACKUP_COMPLETE), GREEN, match *skipped {
+                        0 => saved,
+                        n => tr!(
+                            l,
+                            "{saved}（跳过 {n} 个无法读取的文件）",
+                            "{saved}（略過 {n} 個無法讀取的檔案）",
+                            "{saved} ({n} files couldn't be read and were left out)"
+                        ),
+                    })
                 }
                 BackupEnd::Restored { .. } => {
                     (l.pick(RESTORE_COMPLETE), GREEN, l.pick(["重启手机后，将使用恢复的内容。", "重新啟動手機後，將使用還原的內容。", "The phone uses what was restored once it reboots."]).to_string())
@@ -2232,7 +2240,7 @@ pub fn backup_job(cx: &Ctx) -> Frame {
     }
     let title = l.pick(match (&job.outcome, job.restore) {
         (None, restore) => job_words(restore).1,
-        (Some(BackupEnd::Saved(_)), _) => BACKUP_COMPLETE,
+        (Some(BackupEnd::Saved { .. }), _) => BACKUP_COMPLETE,
         (Some(BackupEnd::Restored { .. }), _) => RESTORE_COMPLETE,
         (Some(_), false) => ["备份未完成", "備份未完成", "Backup incomplete"],
         (Some(_), true) => ["恢复未完成", "還原未完成", "Restore incomplete"],
@@ -4267,7 +4275,7 @@ mod tests {
         assert_eq!(states(&b), ["正在校验 25%", "已备份"]);
         b.outcome = Some(BackupEnd::Failed("the backup does not hold what was stored".into()));
         assert_eq!(states(&b), ["未完成", "未校验"]);
-        b.outcome = Some(BackupEnd::Saved("20261021-141639".into()));
+        b.outcome = Some(BackupEnd::Saved { name: "20261021-141639".into(), skipped: 0 });
         assert_eq!(states(&b), ["已校验", "已校验"]);
         let mut r = job(true, true);
         r.at = Some(at(1, 0, 800, true));

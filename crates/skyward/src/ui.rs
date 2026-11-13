@@ -491,9 +491,10 @@ fn delete_backup(place: Place, folder: &Path) -> Result<()> {
 /// How backing up or restoring ended, as its page tells it.
 fn backup_end(end: backup::End) -> BackupEnd {
     match end {
-        backup::End::Saved(folder) => {
-            BackupEnd::Saved(folder.file_name().expect("a backup's folder has a name").to_string_lossy().into_owned())
-        }
+        backup::End::Saved(folder, skipped) => BackupEnd::Saved {
+            name: folder.file_name().expect("a backup's folder has a name").to_string_lossy().into_owned(),
+            skipped,
+        },
         backup::End::Restored { unmade } => BackupEnd::Restored { unmade: unmade.iter().map(|p| p.display().to_string()).collect() },
         backup::End::Stopped => BackupEnd::Stopped,
         backup::End::Refused(refusal) => BackupEnd::Refused(match refusal {

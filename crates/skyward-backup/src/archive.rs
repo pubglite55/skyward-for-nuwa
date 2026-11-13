@@ -85,27 +85,47 @@ pub fn measure(root: &Path, skipped: &Skipped, cancel: &AtomicBool) -> Result<(u
 /// is, and what it is, not following links.
 fn children(folder: &Path) -> Result<Vec<(std::ffi::OsString, PathBuf, fs::Metadata)>> {
     let mut out = Vec::new();
-    for entry in fs::read_dir(folder).with_context(|| format!("read {}", folder.display()))? {
-        let entry = entry.with_context(|| format!("read {}", folder.display()))?;
+    // A folder this recovery may not list, as one of another user's own
+    // behind a key it does not hold, holds nothing it can archive.
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(e) if locked(&e) => return Ok(out),
+        Err(e) => return Err(e).with_context(|| format!("read {}", folder.display())),
+    };
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name();
         let path = entry.path();
-        let meta = fs::symlink_metadata(&path).with_context(|| format!("look at {}", path.display()))?;
-        out.push((entry.file_name(), path, meta));
+        match fs::symlink_metadata(&path) {
+            Ok(meta) => out.push((name, path, meta)),
+            Err(e) if locked(&e) => continue,
+            Err(e) => return Err(e).with_context(|| format!("look at {}", path.display())),
+        }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(out)
 }
 
+/// Whether `e` is a file the recovery may not read, as one of another user's
+/// own behind a key it does not hold is: such a file is left out of a backup
+/// rather than failing the whole of it.
+fn locked(e: &io::Error) -> bool {
+    e.kind() == ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(libc::EACCES | libc::EPERM | libc::ENOKEY))
+}
+
 /// Write the files of `root` to `out` as an archive: all but what is
 /// `skipped`, sockets, which only the program that made them answers, and
 /// what another filesystem mounted inside holds. A folder comes before what
-/// it holds. Tells how many bytes of file contents are archived so far.
-pub fn pack(root: &Path, skipped: &Skipped, out: impl Write, cancel: &AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<()> {
+/// it holds. Tells how many bytes of file contents are archived so far, and
+/// gives how many files were left out because this recovery may not read
+/// them.
+pub fn pack(root: &Path, skipped: &Skipped, out: impl Write, cancel: &AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<u64> {
     let mut b = Builder::new(out);
     let meta = fs::symlink_metadata(root).with_context(|| format!("look at {}", root.display()))?;
-    let mut packing = Packing { links: HashMap::new(), done: 0, cancel, progress };
+    let mut packing = Packing { links: HashMap::new(), done: 0, skipped: 0, cancel, progress };
     packing.folder(&mut b, root, Path::new(""), meta.dev(), skipped, key(root)?.as_deref())?;
     b.into_inner().context("finish the archive")?.flush().context("finish the archive")?;
-    Ok(())
+    Ok(packing.skipped)
 }
 
 struct Packing<'a> {
@@ -113,6 +133,8 @@ struct Packing<'a> {
     /// device and inode; the others are archived as links to it.
     links: HashMap<(u64, u64), PathBuf>,
     done: u64,
+    /// The files left out because the recovery may not read them.
+    skipped: u64,
     cancel: &'a AtomicBool,
     progress: &'a mut dyn FnMut(u64),
 }
@@ -135,6 +157,13 @@ impl Packing<'_> {
                 // the archive's writing; it was stopped all the same.
                 if self.cancel.load(Ordering::Relaxed) {
                     return Err(Cancelled.into());
+                }
+                // One this recovery may not read — a second space's own,
+                // whose key it does not hold — is left out and counted, so
+                // that the rest of the partition is still backed up.
+                if e.chain().any(|c| c.downcast_ref::<io::Error>().is_some_and(locked)) {
+                    self.skipped += 1;
+                    continue;
                 }
                 return Err(e.context(format!("archive {}", path.display())));
             }

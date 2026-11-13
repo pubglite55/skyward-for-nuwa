@@ -166,8 +166,9 @@ pub enum Event {
 }
 
 pub enum End {
-    /// A backup made, in this folder.
-    Saved(PathBuf),
+    /// A backup made, in this folder, with how many files were left out
+    /// because this recovery may not read them.
+    Saved(PathBuf, u64),
     /// A backup restored, but for the folders a key of their own began in
     /// that are gone, which only the system makes, with what the backup
     /// held in them.
@@ -207,7 +208,7 @@ impl Worker {
                     unsafe { libc::write(signal.as_raw_fd(), [1u8].as_ptr().cast(), 1) };
                 };
                 let ended = match task {
-                    Task::Backup(t) => backup(t, &tell, &stop).map(End::Saved),
+                    Task::Backup(t) => backup(t, &tell, &stop).map(|(folder, left_out)| End::Saved(folder, left_out)),
                     Task::Restore(t) => restore(t, &tell, &stop).map(|unmade| End::Restored { unmade }),
                 };
                 let end = match ended {
@@ -219,7 +220,7 @@ impl Worker {
                     },
                 };
                 let said = match &end {
-                    End::Saved(folder) => format!("backup saved in {}", folder.display()),
+                    End::Saved(folder, left_out) => format!("backup saved in {} with {left_out} files left out", folder.display()),
                     End::Restored { unmade } => format!("backup restored, all but {unmade:?}"),
                     End::Stopped => "backup stopped".into(),
                     End::Refused(why) => format!("backup refused: {why}"),
@@ -344,7 +345,7 @@ fn no_update() -> Result<()> {
     Ok(())
 }
 
-fn backup(t: BackupTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<PathBuf> {
+fn backup(t: BackupTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<(PathBuf, u64)> {
     let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
     let [boot, system, data, efs] = t.parts;
     if system {
@@ -397,6 +398,9 @@ fn backup(t: BackupTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<Pa
         mount::remount_writable(at, true)?;
     }
     let folder = t.into.join(&t.stamp);
+    // The files of the data partition left out because this recovery may
+    // not read them, counted to be said at the end.
+    let mut left_out = 0;
     let made = (|| -> Result<()> {
         skyward_files::make_folders(&folder, t.ownership)?;
         let mut items = Vec::new();
@@ -423,7 +427,7 @@ fn backup(t: BackupTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<Pa
                     copied.with_context(|| format!("back up {name}"))?;
                 }
                 Source::Data => {
-                    archive::pack(Path::new(DATA), &skipped, &mut writer, cancel, &mut |done| telling.done(done))
+                    left_out = archive::pack(Path::new(DATA), &skipped, &mut writer, cancel, &mut |done| telling.done(done))
                         .context("back up the data partition's files")?;
                 }
             }
@@ -457,7 +461,7 @@ fn backup(t: BackupTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<Pa
     } else {
         made?;
     }
-    Ok(folder)
+    Ok((folder, left_out))
 }
 
 /// Read a part back from its files whole and see that it is what was
