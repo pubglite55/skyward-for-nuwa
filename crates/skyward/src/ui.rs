@@ -1101,6 +1101,13 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         | Work::SwitchSystem { .. }
         | Work::SystemStopped => start,
     };
+    // A start of the phone comes to the decrypt page first, as the phone's
+    // own comes to its lock screen: once the partition is open, and nothing
+    // is left to ask, the page goes on to the home page by itself.
+    let first = match first {
+        Screen::Home => Screen::Decrypt,
+        other => other,
+    };
     let mut app = App::new(first, w, h, cfg.display.density as f32 / 160.0);
     app.set_screen_corners(cfg.display.corner_radius as f32);
     // The settings kept from the starts before are back before the first

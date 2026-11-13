@@ -62,6 +62,10 @@ pub struct Band {
 }
 
 pub fn render(screen: Screen, cx: &Ctx) -> Frame {
+    // The lock screen stands over whatever page is under it.
+    if cx.state.locked {
+        return lock(cx);
+    }
     match screen {
         Screen::Decrypt => decrypt(cx),
         Screen::Home => home(cx),
@@ -290,6 +294,7 @@ pub fn home(cx: &Ctx) -> Frame {
         y = first.bottom + t.m.card_gap;
     }
     let tools = widgets::list(&mut c, t, f, y, &[
+        Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
         Row::new(l.pick(["安装", "安裝", "Install"])).icon(GREEN, Icon::Install),
         Row::new(l.pick(["备份", "備份", "Backup"])).icon(BLUE, Icon::Backup),
         Row::new(l.pick(["恢复", "還原", "Restore"])).icon(PURPLE, Icon::Restore),
@@ -297,6 +302,7 @@ pub fn home(cx: &Ctx) -> Frame {
         Row::new(l.pick(DECRYPT)).icon(BLUE, Icon::Lock).trail(Trail::Value(fmt::data(l, &cx.state.data))),
     ]);
     out.extend(hits(&tools.rows, &[
+        Action::Open(Screen::Files),
         Action::Open(Screen::Install),
         Action::Open(Screen::Backup),
         Action::Open(Screen::Restore),
@@ -433,6 +439,35 @@ fn skyward_value(cx: &Ctx) -> Option<&'static str> {
 
 /// How long the screen stays on with nothing touched, opened from the
 /// settings.
+/// The screen the panel comes on with: the time in large type, the battery
+/// under it, and a knob to slide to the right, which lets the page under it
+/// be used again.
+pub fn lock(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = page(cx);
+    let m = &t.m;
+    let mid = m.w as f32 / 2.0;
+    let time = match s.clock.is_empty() {
+        true => "--:--",
+        false => s.clock.as_str(),
+    };
+    c.text_center(&f.title, time, mid, m.h as f32 * 0.30, m.dp(84.0), t.pal.text);
+    let battery = match cx.info.battery.as_ref() {
+        Some(b) => format!("{}%", b.level),
+        None => l.pick(["电量未知", "電量未知", "Battery not read"]).to_string(),
+    };
+    c.text_center(&f.body, &battery, mid, m.h as f32 * 0.30 + m.dp(76.0), m.sub_px, t.pal.subtitle);
+    let note = l.pick(["向右滑动解锁", "向右滑動解鎖", "Slide right to unlock"]);
+    let bar = m.w as f32 * 0.62;
+    let y = m.h as f32 * 0.76;
+    c.text_center(&f.body, note, mid, y - m.dp(34.0), m.sub_px, t.pal.subtitle);
+    widgets::progress_bar(&mut c, t, mid - bar / 2.0, y, bar, s.lock_pull);
+    let mut frame = Frame::new(t, c, Vec::new(), "", m.content_top);
+    frame.back = false;
+    frame.header = false;
+    frame
+}
+
 pub fn screen_off(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let mut c = page(cx);
