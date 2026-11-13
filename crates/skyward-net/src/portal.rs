@@ -96,7 +96,7 @@ fn serve(mut stream: TcpStream, slot: &Arc<Mutex<Option<String>>>) -> Result<()>
     };
     let head = format!(
         "HTTP/1.1 {code} {reason}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n",
-        body.as_bytes().len()
+        body.len()
     );
     stream.write_all(head.as_bytes())?;
     stream.write_all(body.as_bytes())?;
