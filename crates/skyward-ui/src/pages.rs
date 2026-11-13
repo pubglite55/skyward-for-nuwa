@@ -3,7 +3,7 @@ use crate::app::{
     FileOp, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows, Screen,
     SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, SortKey, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe,
     ADDABLE,
-    BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
+    BACKUP_PARTS, BROWSE_HOME, QUICK, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
     USB_DRIVE_WANTED, WIPES, installs, starting,
 };
 use crate::canvas::Canvas;
@@ -14,6 +14,7 @@ use crate::fmt::{self, Verb};
 use crate::font::Fonts;
 use crate::geom::Rect;
 use crate::lang::{Lang, Text};
+use crate::picture;
 use crate::search;
 use crate::term::{self, Term};
 use crate::theme::Theme;
@@ -38,6 +39,8 @@ const PURPLE: Rgba = Rgba::rgb(0x77, 0x67, 0xf9);
 const SLATE: Rgba = Rgba::rgb(0x8c, 0x9d, 0xb0);
 const ORANGE: Rgba = Rgba::rgb(0xff, 0x69, 0x00);
 const RED: Rgba = Rgba::rgb(0xfa, 0x38, 0x2e);
+/// The tiles the browser offers with nothing shown yet.
+const QUICK_INK: [Rgba; 3] = [BLUE, Rgba::rgb(0x24, 0x2b, 0x33), ORANGE];
 
 /// What every page draws from: style, typefaces, the device readings, and
 /// what the pages hold, from the choices made on them to where the data
@@ -2292,6 +2295,8 @@ pub fn advanced(cx: &Ctx) -> Frame {
 const BROWSER: Text = ["浏览器", "瀏覽器", "Browser"];
 const BROWSE_HINT: Text = ["输入网址，如 https://example.com", "輸入網址，如 https://example.com", "Type an address, such as https://example.com"];
 const BROWSE_OPEN: Text = ["打开", "打開", "Open"];
+const BROWSE_WELCOME: Text = ["搜一搜，或输入网址", "搜一搜，或輸入網址", "Look something up, or type an address"];
+const BROWSE_SEARCH: Text = ["搜索网页", "搜尋網頁", "Search the web"];
 const BROWSE_BACK: Text = ["上一页", "上一頁", "Back"];
 const BROWSE_RELOAD: Text = ["刷新", "重新整理", "Reload"];
 const BROWSE_FOLDER: Text = ["下载文件夹", "下載資料夾", "Download folder"];
@@ -3399,6 +3404,9 @@ enum Kind {
 /// The recovery's own browser: the address it is at, the pages gone through,
 /// and what the page says in its markup — headings, paragraphs, and links a
 /// finger follows.
+/// The recovery's own browser: the address in a bar at the top, and under it
+/// what the page says — its title, its words, its pictures — or, with nothing
+/// shown yet, a page of its own to search from.
 pub fn browser(cx: &Ctx) -> Frame {
     let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
     let m = &t.m;
@@ -3413,57 +3421,77 @@ pub fn browser(cx: &Ctx) -> Frame {
         keyboard_hits(&mut c, t, f, s, l.pick(BROWSE_OPEN), &mut out);
         return Frame { caret: Some(caret), ..Frame::new(t, c, out, l.pick(BROWSER), top) };
     }
-    // Reading: the address and the way back over it, then the page's words.
     let x = m.title_x;
     let max_w = m.w as f32 - x - m.title_x;
-    let mut rows = Vec::new();
-    let mut picks = Vec::new();
-    if !b.history.is_empty() {
-        rows.push(Row::new(l.pick(BROWSE_BACK)));
-        picks.push(Action::BrowseBack);
-    }
-    let shown = match b.at.is_empty() {
-        true => b.url.clone(),
-        false => b.at.clone(),
-    };
-    rows.push(Row::new(&shown).icon(BLUE, Icon::Globe));
-    picks.push(Action::BrowseEdit);
-    if !b.at.is_empty() {
-        rows.push(Row::new(l.pick(BROWSE_RELOAD)));
-        picks.push(Action::BrowseReload);
-    }
-    rows.push(Row::new(l.pick(BROWSE_FOLDER)).trail(Trail::Value(&s.browse_folder)));
-    picks.push(Action::Open(Screen::PickFolder));
-    let rows_h = m.row_h * rows.len() as f32;
-    let mut y = top + rows_h + m.dp(8.0);
+    let bar_h = m.dp(52.0);
+    let mut y = top + bar_h + m.dp(10.0);
     let measure = Canvas::new(2, 2);
     let mut placed: Vec<Placed> = Vec::new();
-    // How reading stands, and what it came to.
+    // The pictures drawn, by the address each is at, where it goes and how
+    // big it is.
+    let mut drawn: Vec<(String, f32, f32, f32, f32)> = Vec::new();
+    let mut start_page = false;
     let note = match &b.status {
         BrowseStatus::Loading => Some(l.pick(BROWSE_LOADING).to_string()),
         BrowseStatus::Failed(why) => Some(why.clone()),
         _ => None,
     };
-    if let Some(text) = note {
-        let lines = widgets::wrap(&measure, &f.body, &text, m.sub_px, max_w);
+    if let Some(text) = &note {
+        let lines = widgets::wrap(&measure, &f.body, text, m.sub_px, max_w);
         let h = lines.len() as f32 * m.sub_pitch;
         placed.push(Placed { lines, top: y, pitch: m.sub_pitch, px: m.sub_px, kind: Kind::Note });
-        y += h;
+        y += h + m.dp(6.0);
+    }
+    // With nothing shown, the page the browser opens on: its name, a field to
+    // search from, and the pages offered under it.
+    let word_cy = y + m.dp(40.0);
+    let sub_top = word_cy + m.dp(22.0);
+    let search_top = word_cy + m.dp(62.0);
+    let search_h = m.dp(54.0);
+    let tile = m.dp(84.0);
+    let tiles_top = search_top + search_h + m.dp(44.0);
+    if b.page.is_none() && note.is_none() {
+        start_page = true;
+        y = tiles_top + tile + m.dp(44.0);
     }
     if let Some(page) = &b.page {
         let heading = &f.heading;
         if !page.title.is_empty() {
-            y += m.dp(10.0);
             let lines = widgets::wrap(&measure, heading, &page.title, m.dp(22.0), max_w);
             let h = lines.len() as f32 * m.dp(28.0);
             placed.push(Placed { lines, top: y, pitch: m.dp(28.0), px: m.dp(22.0), kind: Kind::Heading });
-            y += h;
+            y += h + m.dp(8.0);
         }
         for (at, block) in page.blocks.iter().enumerate() {
+            // A picture stands where the page puts it, as far as this
+            // recovery could read it; one it could not is its words, if it
+            // has any.
+            if let Block::Image { to, alt } = block {
+                match b.images.get(to) {
+                    Some(pic) => {
+                        let w = max_w;
+                        let h = (w * pic.h as f32 / pic.w as f32).min(m.dp(340.0));
+                        y += m.dp(10.0);
+                        drawn.push((to.clone(), x, y, w, h));
+                        y += h + m.dp(10.0);
+                    }
+                    None => {
+                        if alt.is_empty() {
+                            continue;
+                        }
+                        let lines = widgets::wrap(&measure, &f.body, alt, m.sub_px, max_w);
+                        let h = lines.len() as f32 * m.sub_pitch;
+                        placed.push(Placed { lines, top: y + m.dp(4.0), pitch: m.sub_pitch, px: m.sub_px, kind: Kind::Note });
+                        y += h + m.dp(4.0);
+                    }
+                }
+                continue;
+            }
             let (words, kind) = match block {
                 Block::Heading(words) => (words, Kind::Heading),
                 Block::Words(words) => (words, Kind::Words),
                 Block::Link { words, .. } => (words, Kind::Link(at)),
+                Block::Image { .. } => continue,
             };
             let (px, pitch, gap, face) = match kind {
                 Kind::Heading => (m.dp(20.0), m.dp(26.0), m.dp(12.0), heading),
@@ -3479,8 +3507,7 @@ pub fn browser(cx: &Ctx) -> Frame {
             y += h;
         }
         if page.blocks.is_empty() && matches!(b.status, BrowseStatus::Shown) {
-            let text = l.pick(BROWSE_EMPTY);
-            let lines = widgets::wrap(&measure, &f.body, text, m.sub_px, max_w);
+            let lines = widgets::wrap(&measure, &f.body, l.pick(BROWSE_EMPTY), m.sub_px, max_w);
             let h = lines.len() as f32 * m.sub_pitch;
             placed.push(Placed { lines, top: y + m.dp(10.0), pitch: m.sub_pitch, px: m.sub_px, kind: Kind::Note });
             y += h + m.dp(10.0);
@@ -3500,20 +3527,25 @@ pub fn browser(cx: &Ctx) -> Frame {
             0 => 0.0,
             all => (*done as f32 / all as f32).clamp(0.0, 1.0),
         };
-        let bar = Rect::new(x, y, max_w, m.dp(6.0));
-        taking = Some((bar, share));
+        taking = Some((Rect::new(x, y, max_w, m.dp(6.0)), share));
         let _ = rate;
-        y += bar.h + m.dp(10.0);
+        y += m.dp(16.0);
     }
-    let bottom = y + m.dp(10.0);
+    // Where a file a link holds is kept, said under the page and taken where
+    // the folders show.
+    y += m.dp(14.0);
+    let folder = s.browse_folder.clone();
+    let folder = tr!(
+        l,
+        "文件存到 {folder}",
+        "檔案存到 {folder}",
+        "Files are kept in {folder}"
+    );
+    let folder_top = y;
+    y += m.sub_pitch + m.dp(10.0);
+    let bottom = y + m.dp(6.0);
     let mut c = sheet(cx, fitted(t, bottom), t.pal.bg);
     let mut out = Vec::new();
-    let list = widgets::list(&mut c, t, f, top, &rows);
-    out.extend(hits(&list.rows, &picks));
-    if let Some((bar, share)) = taking {
-        c.fill_round_rect(bar.x, bar.y, bar.w, bar.h, bar.h / 2.0, t.pal.track);
-        c.fill_round_rect(bar.x, bar.y, (bar.w * share).max(bar.h), bar.h, bar.h / 2.0, t.pal.accent);
-    }
     for p in &placed {
         let (face, ink) = match &p.kind {
             Kind::Heading => (&f.heading, t.pal.text),
@@ -3532,6 +3564,92 @@ pub fn browser(cx: &Ctx) -> Frame {
             });
         }
     }
+    // Pictures, where they fall in the rows this canvas holds.
+    let held = c.held();
+    for (to, px, py, w, h) in &drawn {
+        let (from, until) = (py.round().max(0.0) as u32, (py + h).round().max(0.0) as u32);
+        if until <= held.start || from >= held.end {
+            continue;
+        }
+        if let Some(pic) = b.images.get(to) {
+            picture::draw(&mut c, pic, *px, *py, *w, *h);
+        }
+    }
+    // The file being taken, and how much of it has come.
+    if let Some((bar, share)) = taking {
+        c.fill_round_rect(bar.x, bar.y, bar.w, bar.h, bar.h / 2.0, t.pal.track);
+        c.fill_round_rect(bar.x, bar.y, (bar.w * share).max(bar.h), bar.h, bar.h / 2.0, t.pal.accent);
+    }
+    // The page the browser opens on, drawn: its name, the field to search
+    // from, and the pages offered under it.
+    if start_page {
+        c.text_center(&f.heading, "Bing", m.w as f32 / 2.0, word_cy, m.dp(52.0), t.pal.accent);
+        c.text_center(&f.body, l.pick(BROWSE_WELCOME), m.w as f32 / 2.0, sub_top + m.dp(8.0), m.sub_px, t.pal.subtitle);
+        c.fill_round_rect(x, search_top, max_w, search_h, search_h / 2.0, t.pal.card);
+        c.stroke_round_rect(x, search_top, max_w, search_h, search_h / 2.0, m.dp(1.0), t.pal.track);
+        let cy = search_top + search_h / 2.0;
+        let r = m.dp(7.0);
+        c.stroke_circle(x + m.dp(26.0), cy - m.dp(2.0), r, m.dp(1.8), t.pal.search_icon);
+        c.line(
+            x + m.dp(26.0) + r * 0.7,
+            cy - m.dp(2.0) + r * 0.7,
+            x + m.dp(26.0) + r * 1.6,
+            cy - m.dp(2.0) + r * 1.6,
+            m.dp(1.8),
+            t.pal.search_icon,
+        );
+        c.text_vc(&f.body, l.pick(BROWSE_SEARCH), x + m.dp(48.0), cy, m.dp(16.0), t.pal.placeholder, Some(max_w - m.dp(64.0)));
+        out.push(Hit { rect: Rect::new(x, search_top, max_w, search_h), action: Action::BrowseSearch });
+        let gap = (max_w - tile * 3.0) / 2.0;
+        for (k, (words, _)) in QUICK.iter().enumerate() {
+            let tx = x + k as f32 * (tile + gap);
+            c.fill_round_rect(tx, tiles_top, tile, tile, m.dp(22.0), QUICK_INK[k]);
+            let mark: String = words.chars().take(1).collect();
+            c.text_center(&f.heading, &mark, tx + tile / 2.0, tiles_top + tile / 2.0, m.dp(32.0), Rgba::rgb(255, 255, 255));
+            c.text_center(&f.body, words, tx + tile / 2.0, tiles_top + tile + m.dp(18.0), m.dp(13.0), t.pal.info);
+            out.push(Hit { rect: Rect::new(tx, tiles_top, tile, tile + m.dp(30.0)), action: Action::Quick(k) });
+        }
+    }
+    // The bar at the top: the way back where there is one, the address, and
+    // the way to read it again.
+    let has_back = !b.history.is_empty();
+    let back_w = if has_back { m.dp(40.0) } else { 0.0 };
+    let pill_h = m.dp(44.0);
+    let pill_y = top + m.dp(4.0);
+    let pill_x = x + back_w;
+    let pill_w = max_w - back_w;
+    let cy = pill_y + pill_h / 2.0;
+    c.fill_round_rect(pill_x, pill_y, pill_w, pill_h, pill_h / 2.0, t.pal.search);
+    icons::glyph(&mut c, Icon::Globe, pill_x + m.dp(22.0), cy, m.dp(18.0), t.pal.search_icon);
+    let shown = match b.at.is_empty() {
+        true => BROWSE_HOME.to_string(),
+        false => b.at.clone(),
+    };
+    c.text_vc(&f.body, &shown, pill_x + m.dp(38.0), cy, m.dp(14.0), t.pal.info, Some(pill_w - m.dp(76.0)));
+    if has_back {
+        let bx = x + m.dp(12.0);
+        c.line(bx + m.dp(8.0), cy - m.dp(8.0), bx, cy, m.dp(2.0), t.pal.text);
+        c.line(bx, cy, bx + m.dp(8.0), cy + m.dp(8.0), m.dp(2.0), t.pal.text);
+        out.push(Hit { rect: Rect::new(x, top, back_w, bar_h), action: Action::BrowseBack });
+    }
+    if !b.at.is_empty() {
+        let rx = pill_x + pill_w - m.dp(24.0);
+        let r = m.dp(7.0);
+        c.stroke_arc(rx, cy, r, -std::f32::consts::FRAC_PI_2 + 0.7, std::f32::consts::TAU - 1.4, m.dp(1.7), t.pal.search_icon);
+        // The head of the arrow, where the arc begins.
+        let (tip_x, tip_y) = (rx + r * 0.85, cy - r * 0.75);
+        c.fill_convex(
+            &[(tip_x, tip_y - m.dp(4.0)), (tip_x + m.dp(5.0), tip_y + m.dp(2.0)), (tip_x - m.dp(2.0), tip_y + m.dp(2.5))],
+            t.pal.search_icon,
+        );
+        out.push(Hit { rect: Rect::new(pill_x + pill_w - m.dp(44.0), pill_y, m.dp(44.0), pill_h), action: Action::BrowseReload });
+    }
+    out.push(Hit { rect: Rect::new(pill_x, pill_y, pill_w - m.dp(44.0), pill_h), action: Action::BrowseEdit });
+    c.text_top(&f.body, &folder, x, folder_top, m.sub_px, t.pal.subtitle, Some(max_w));
+    out.push(Hit {
+        rect: Rect::new(x, folder_top - m.dp(4.0), max_w, m.sub_pitch + m.dp(8.0)),
+        action: Action::Open(Screen::PickFolder),
+    });
     Frame::new(t, c, out, l.pick(BROWSER), top)
 }
 

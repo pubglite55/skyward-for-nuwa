@@ -12,6 +12,7 @@ use crate::glow::{self, GlowClock};
 use crate::lang::{Lang, Text};
 use crate::motion::{self, Spring};
 use crate::pages::{self, Band, Ctx};
+use crate::picture::Picture;
 use crate::sprite::{Blurs, Sprite};
 use crate::search;
 use crate::settings::Settings;
@@ -958,7 +959,55 @@ pub const BROWSER_FOLDER: &str = "/sdcard/Download";
 
 /// The page the browser comes to with nothing asked of it: the search page
 /// the phone's own browser opens on.
-const BROWSE_HOME: &str = "https://cn.bing.com/";
+pub const BROWSE_HOME: &str = "https://cn.bing.com/";
+
+/// The pages the browser offers, side by side, when it has nothing shown
+/// yet: the words of each, and the address it opens.
+pub const QUICK: [(&str, &str); 3] = [
+    ("必应", "https://cn.bing.com/"),
+    ("GitHub", "https://github.com/"),
+    ("小米", "https://www.mi.com/"),
+];
+
+/// The address what was typed names: an address as it stands, a host given
+/// https before it, and anything else — words to look up — sent to the search
+/// page. Nothing at all where nothing was typed.
+fn addressed(typed: &str) -> Option<String> {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return None;
+    }
+    let lower = typed.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Some(typed.to_string());
+    }
+    if typed.chars().all(|c| c.is_ascii()) && !typed.contains(char::is_whitespace) && looks_like_host(typed) {
+        return Some(format!("https://{typed}"));
+    }
+    Some(format!("https://cn.bing.com/search?q={}", quoted(typed)))
+}
+
+/// Whether `text` names a host, as `example.com` or `example.com/a` does:
+/// a dot in it, and letters after the last dot.
+fn looks_like_host(text: &str) -> bool {
+    let host = text.split(['/', '?', '#']).next().unwrap_or(text);
+    let Some((_, last)) = host.rsplit_once('.') else { return false };
+    last.len() >= 2 && last.chars().all(|c| c.is_ascii_alphabetic())
+}
+
+/// `text` as an address's query holds it: letters, digits and `-._~` as they
+/// are, a space as a plus, and every other byte of its UTF-8 as `%XX`.
+fn quoted(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(byte as char),
+            b' ' => out.push('+'),
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
 
 /// The recovery's own browser: the address it is at, the page it made of it,
 /// and the pages gone through to get here.
@@ -975,6 +1024,9 @@ pub struct Browse {
     pub history: Vec<String>,
     /// The address field is being typed in: the keys are up.
     pub typing: bool,
+    /// The pictures of the page shown, by the address each is at, as far as
+    /// this recovery can show them.
+    pub images: std::collections::BTreeMap<String, Picture>,
 }
 
 impl Default for Browse {
@@ -988,6 +1040,7 @@ impl Default for Browse {
             status: BrowseStatus::Idle,
             history: Vec::new(),
             typing: false,
+            images: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -1356,6 +1409,10 @@ pub enum Action {
     BrowseBack,
     /// Read this page again.
     BrowseReload,
+    /// Open the browser's field with nothing in it, for words to look up.
+    BrowseSearch,
+    /// Open the page at this one of [`QUICK`].
+    Quick(usize),
     /// Open the folder at this entry of the one the picker shows.
     PickInto(usize),
     /// Up to the folder the one shown is in.
@@ -5164,18 +5221,13 @@ impl App {
     /// back to. Nothing is asked of the network here: the runtime reads it
     /// and tells [`App::browsed`].
     fn browse_to(&mut self, url: String, now: u64) -> Vec<Effect> {
-        let url = url.trim().to_string();
-        if url.is_empty() {
-            self.say(self.state.lang.pick(["请输入网址", "請輸入網址", "Enter an address"]), now);
-            return Vec::new();
-        }
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
-            self.say(
-                self.state.lang.pick(["网址需以 http:// 或 https:// 开头", "網址需以 http:// 或 https:// 開頭", "An address starts with http:// or https://"]),
-                now,
-            );
-            return Vec::new();
-        }
+        let url = match addressed(&url) {
+            Some(url) => url,
+            None => {
+                self.say(self.state.lang.pick(["请输入网址或要搜索的词", "請輸入網址或要搜尋的詞", "Type an address, or what to look up"]), now);
+                return Vec::new();
+            }
+        };
         let b = &mut self.state.browser;
         // The page shown is the one gone back to, unless it is this one.
         if !b.at.is_empty() && b.at != url {
@@ -5197,6 +5249,7 @@ impl App {
     /// went is what the browser shows.
     pub fn browsed(&mut self, page: Result<Page, String>) {
         let b = &mut self.state.browser;
+        b.images.clear();
         match page {
             Ok(page) => {
                 b.page = Some(page);
@@ -5208,6 +5261,17 @@ impl App {
             }
         }
         self.refresh();
+    }
+
+    /// A picture of the page shown has come: it is kept to be drawn, if it
+    /// is one this recovery can read, and the page is drawn again.
+    pub fn pictured(&mut self, at: String, png: &[u8]) {
+        if let Some(picture) = crate::picture::read_png(png) {
+            self.state.browser.images.insert(at, picture);
+            if self.screen() == Screen::Browser {
+                self.refresh();
+            }
+        }
     }
 
     fn say(&mut self, text: &str, now: u64) {
@@ -5590,12 +5654,6 @@ impl App {
             // The picker shows the folder files are saved in, and the browser
             // opens on the page it comes to with nothing asked of it.
             Screen::PickFolder => vec![Effect::ReadDir(self.state.browse_folder.clone())],
-            Screen::Browser if self.state.browser.page.is_none() && matches!(self.state.browser.status, BrowseStatus::Idle) && !self.state.browser.url.is_empty() => {
-                let b = &mut self.state.browser;
-                b.at = b.url.clone();
-                b.status = BrowseStatus::Loading;
-                vec![Effect::Browse(b.at.clone())]
-            }
             // The files are what the page is about: the partition they are
             // in is opened as the page opens, so that turning the switch
             // needs nothing else.
@@ -5685,6 +5743,16 @@ impl App {
                 let url = self.state.browser.at.clone();
                 if !url.is_empty() {
                     return self.browse_to(url, now);
+                }
+            }
+            Action::BrowseSearch => {
+                self.state.browser.url.clear();
+                self.state.browser.typing = true;
+                self.refresh();
+            }
+            Action::Quick(k) => {
+                if let Some((_, url)) = QUICK.get(k).copied() {
+                    return self.browse_to(url.to_string(), now);
                 }
             }
             // The folder a file taken from the web is saved in: the picker
@@ -8811,12 +8879,19 @@ mod tests {
     }
 
     #[test]
-    fn an_address_that_is_not_a_web_one_is_turned_down() {
+    fn a_host_is_given_https_and_words_are_looked_up() {
         let mut app = App::new(Screen::Browser, W, H, PPD);
-        app.state.browser.url = "example.com".into();
-        assert!(app.act(Action::BrowseGo, 0).is_empty(), "nothing is read");
+        app.state.browser.url = "example.com/a".into();
+        assert_eq!(app.act(Action::BrowseGo, 0), vec![Effect::Browse("https://example.com/a".into())]);
+        app.state.browser.url = "小米 13".into();
+        assert_eq!(
+            app.act(Action::BrowseGo, 10),
+            vec![Effect::Browse("https://cn.bing.com/search?q=%E5%B0%8F%E7%B1%B3+13".into())],
+            "words are looked up, each byte of them quoted"
+        );
+        app.state.browser.url = "   ".into();
+        assert!(app.act(Action::BrowseGo, 20).is_empty(), "nothing is read");
         assert!(app.toast.is_some(), "and the page says why");
-        assert_eq!(app.state.browser.status, BrowseStatus::Idle);
     }
 
     #[test]

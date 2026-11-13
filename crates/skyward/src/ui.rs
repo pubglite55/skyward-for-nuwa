@@ -2142,7 +2142,12 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         if let Some(read) = read {
             page_reader = None;
             match read {
-                Ok(Read::Page(page)) => app.browsed(Ok(page)),
+                Ok(Read::Page { page, pictures }) => {
+                    app.browsed(Ok(page));
+                    for (at, png) in pictures {
+                        app.pictured(at, &png);
+                    }
+                }
                 Ok(Read::File { url, name }) => {
                     let dir = PathBuf::from(&app.state.browse_folder);
                     if let Err(e) = start_download(&mut app, &mut fetcher, servers.clone(), url, name, dir) {

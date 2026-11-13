@@ -23,18 +23,31 @@ pub enum Block {
     Heading(String),
     /// Words that lead to another address.
     Link { words: String, to: String },
+    /// A picture the page shows, at this address; `alt` is what it says of
+    /// itself for a reader that cannot show it.
+    Image { to: String, alt: String },
 }
 
-/// How many blocks of one page are kept, and how many words: what a
-/// recovery can show without holding a page's whole of it.
+/// How many blocks of one page are kept, how many words, and how many
+/// pictures: what a recovery can show without holding a page's whole of it.
 const MOST_BLOCKS: usize = 400;
 const MOST_WORDS: usize = 200_000;
+const MOST_IMAGES: usize = 6;
 
 /// Read `markup` as a page, its links made whole against `base`, the
 /// address it was read from.
 pub fn parse(markup: &str, base: &str) -> Page {
-    let mut built =
-        Built { base, title: String::new(), blocks: Vec::new(), words: String::new(), link: None, heading: false, broken: false, words_kept: 0 };
+    let mut built = Built {
+        base,
+        title: String::new(),
+        blocks: Vec::new(),
+        words: String::new(),
+        link: None,
+        heading: false,
+        broken: false,
+        words_kept: 0,
+        images: 0,
+    };
     built.run(markup);
     built.flush();
     let mut page = Page { title: built.title.trim().to_string(), blocks: built.blocks };
@@ -65,6 +78,8 @@ struct Built<'a> {
     /// next starts a block of its own.
     broken: bool,
     words_kept: usize,
+    /// How many pictures the page has given so far.
+    images: usize,
 }
 
 impl Built<'_> {
@@ -115,6 +130,22 @@ impl Built<'_> {
                     }
                 }
                 "a" => self.flush(),
+                // A picture is a block of its own, where a browser here can
+                // reach it: its address made whole, and what it says of
+                // itself.
+                "img" if !closing => {
+                    self.flush();
+                    self.broken = true;
+                    if self.images < MOST_IMAGES {
+                        if let Some(to) = attribute(tag, "src").and_then(|src| absolute(self.base, &src)) {
+                            self.images += 1;
+                            let alt = attribute(tag, "alt").map(|alt| collapse(&decode(&alt))).unwrap_or_default();
+                            if self.blocks.len() < MOST_BLOCKS {
+                                self.blocks.push(Block::Image { to, alt });
+                            }
+                        }
+                    }
+                }
                 "h1" | "h2" | "h3" | "h4" | "h5" | "h6" if !closing => {
                     self.flush();
                     self.heading = true;
@@ -393,6 +424,22 @@ mod tests {
         assert_eq!(absolute(base, "#top"), None);
         assert_eq!(absolute(base, "javascript:void(0)"), None);
         assert_eq!(absolute(base, ""), None);
+    }
+
+    #[test]
+    fn a_picture_is_a_block_of_its_own_with_the_address_it_is_at() {
+        let page = parse(
+            "<p>上面<img src=\"/img/a.png\" alt=\"一张图\">下面</p><img src=\"data:image/png;base64,xx\">",
+            "https://example.com/x/y",
+        );
+        assert_eq!(
+            page.blocks,
+            vec![
+                Block::Words("上面".into()),
+                Block::Image { to: "https://example.com/img/a.png".into(), alt: "一张图".into() },
+                Block::Words("下面".into()),
+            ]
+        );
     }
 
     #[test]

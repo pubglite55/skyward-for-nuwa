@@ -2,14 +2,15 @@
 //! for one and is told when it has come, or why it did not.
 //!
 //! The address is only ever http or https, and only what a page says in its
-//! markup is kept: no picture is fetched, and nothing a script would draw is
-//! run. What comes back is either the page, as [`skyward_net::html`] reads
-//! it, or the name of a file the address holds, which the browser takes into
-//! the folder it saves to.
+//! markup is kept: the pictures it shows are taken too, as many as a recovery
+//! can hold, and nothing a script would draw is run. What comes back is
+//! either the page, as [`skyward_net::html`] reads it, with the PNG pictures
+//! it shows, or the name of a file the address holds, which the browser takes
+//! into the folder it saves to.
 
 use anyhow::{Context, Result};
 use skyward_net::download;
-use skyward_net::html::{self, Page};
+use skyward_net::html::{self, Block, Page};
 use skyward_net::http;
 use std::io::Read as _;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -18,11 +19,17 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 /// it can hold.
 const MOST: u64 = 512 * 1024;
 
+/// How many of a page's pictures are taken, and how much of each: enough for
+/// the page to look like itself, and little enough to keep.
+const MOST_PICTURES: usize = 3;
+const MOST_PICTURE: u64 = 1024 * 1024;
+
 /// What reading an address came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Read {
-    /// A page, as its markup says it.
-    Page(Page),
+    /// A page, as its markup says it, with the pictures it shows that this
+    /// recovery can read: each by the address it is at, and its PNG.
+    Page { page: Page, pictures: Vec<(String, Vec<u8>)> },
     /// A file the address holds, which is taken into the folder the browser
     /// saves to, under this name.
     File { url: String, name: String },
@@ -85,7 +92,42 @@ fn fetch(url: &str, servers: http::Servers) -> Result<Read, String> {
         .read_to_end(&mut body)
         .map_err(|e| format!("读页面失败：{e}"))?;
     let markup = String::from_utf8_lossy(&body);
-    Ok(Read::Page(html::parse(&markup, url)))
+    let page = html::parse(&markup, url);
+    let mut pictures = Vec::new();
+    for block in &page.blocks {
+        if pictures.len() >= MOST_PICTURES {
+            break;
+        }
+        let Block::Image { to, .. } = block else { continue };
+        if pictures.iter().any(|(at, _)| at == to) {
+            continue;
+        }
+        if let Some(png) = picture(&agent, to) {
+            pictures.push((to.clone(), png));
+        }
+    }
+    Ok(Read::Page { page, pictures })
+}
+
+/// The PNG at `to`, where it is one and is no bigger than is kept: a picture
+/// of another kind is left out, as it cannot be drawn here.
+fn picture(agent: &ureq::Agent, to: &str) -> Option<Vec<u8>> {
+    let mut answer = agent.get(to).call().ok()?;
+    if !answer.status().is_success() {
+        return None;
+    }
+    let kind = answer
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !kind.starts_with("image/png") {
+        return None;
+    }
+    let mut body = Vec::new();
+    answer.body_mut().with_config().limit(MOST_PICTURE).reader().read_to_end(&mut body).ok()?;
+    (!body.is_empty()).then_some(body)
 }
 
 /// The name a file at `url` is taken under, where what came back is a file
