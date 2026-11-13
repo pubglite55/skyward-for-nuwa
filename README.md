@@ -35,9 +35,8 @@ This repository carries Skyward to one phone: the **Xiaomi 13 Pro**
 - **Hands storage to a computer** over MTP, and speaks adb and fastbootd.
 - **WLAN**, joining the network kept at the next start by itself, for updates
   straight from the network.
-- **A lock screen and a control centre**: slide to unlock, two taps to light a
-  dark panel; pulled from the top edge, the centre holds WLAN, a screenshot,
-  reboot and screen off, with sliders for the backlight and the motor.
+- **A browser** (Advanced → Browser): type an address, read the page's words
+  and links, and follow them; scripts are not run and pictures are not shown.
 - **Wireless transfer**: a browser on the same network opens
   `http://<phone>:8080/` to list, download and drop files onto the phone.
 - **Downloads from an address**: straight into `Download/`, resumed when
@@ -53,7 +52,7 @@ This repository carries Skyward to one phone: the **Xiaomi 13 Pro**
 | Opening the data partition | verified (keys made by Android 17, phone on 16) |
 | adb | verified |
 | Installing, MTP, fastbootd, WLAN, backup and restore, Dual boot, online updates | inherited from 0.2.0, not yet exercised here |
-| The control centre, the lock screen, the kept WLAN, the code on the download page | built and unit-tested; the look is still to be seen on the phone |
+| The kept WLAN, the code on the download page, the browser | built and unit-tested; the look is still to be seen on the phone |
 
 ## Getting it onto the phone
 
@@ -92,6 +91,7 @@ working; flashing the stock recovery back is all it takes to return to it.
 | Dual boot | A second system in the data partition, installed, switched to, removed |
 | Wireless | Internal storage handed to a browser on the same network: list, download, upload |
 | Download | An address taken into `Download/`, resumed when stopped; a code or `link.txt` brings one |
+| Browser | A page's words and links, read as markup; no scripts, no pictures |
 | Tools | A terminal, the kernel log, and the recovery's own log |
 | Settings | Theme, language, time zone, screen-off time, vibration, file transfer |
 | Reboot | System, recovery, fastboot, bootloader, EDL, and the slot to boot |
