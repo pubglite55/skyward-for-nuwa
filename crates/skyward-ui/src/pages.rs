@@ -115,6 +115,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Fetch => fetch(cx),
         Screen::Sort => sort(cx),
         Screen::Browser => browser(cx),
+        Screen::PickFolder => pick_folder(cx),
     }
 }
 
@@ -2293,6 +2294,8 @@ const BROWSE_HINT: Text = ["输入网址，如 https://example.com", "輸入網�
 const BROWSE_OPEN: Text = ["打开", "打開", "Open"];
 const BROWSE_BACK: Text = ["上一页", "上一頁", "Back"];
 const BROWSE_RELOAD: Text = ["刷新", "重新整理", "Reload"];
+const BROWSE_FOLDER: Text = ["下载文件夹", "下載資料夾", "Download folder"];
+const PICK_HERE: Text = ["把文件存到这里", "把檔案存到這裡", "Save files here"];
 const BROWSE_LOADING: Text = ["正在读取…", "正在讀取…", "Reading…"];
 const BROWSE_EMPTY: Text = [
     "这一页没有可显示的文字：它可能要脚本才能显示。",
@@ -3340,6 +3343,38 @@ const FETCH: Text = ["网络下载", "網路下載", "Download"];
 const START_FETCH: Text = ["下载", "下載", "Download"];
 const STOP_FETCH: Text = ["停止下载", "停止下載", "Stop"];
 
+/// The folder the files taken from the web are saved in: the folders of
+/// internal storage, one by one, and the one the picker shows to take.
+pub fn pick_folder(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let m = &t.m;
+    let top = m.content_top;
+    let mut rows = Vec::new();
+    let mut picks = Vec::new();
+    if s.files.path != "/" {
+        rows.push(Row::new(".."));
+        picks.push(Action::PickUp);
+    }
+    let entries = s.files.entries.as_deref().unwrap_or(&[]);
+    for (i, entry) in entries.iter().enumerate() {
+        if matches!(entry.kind, FileKind::Folder { .. } | FileKind::Link { folder: true, .. }) {
+            rows.push(Row::new(&entry.name));
+            picks.push(Action::PickInto(i));
+        }
+    }
+    // The page is as tall as the folders it lists and the row that takes
+    // the one shown, so a long list is walked whole.
+    let height = top + m.card_gap * 2.0 + (rows.len() as f32 + 1.0) * m.row_h + m.margin * 2.0;
+    let mut c = sheet(cx, (height.ceil() as u32).max(m.h), t.pal.bg);
+    let mut out = Vec::new();
+    let y = widgets::section_first(&mut c, t, f, top, &s.files.path);
+    let list = widgets::list(&mut c, t, f, y + m.card_gap, &rows);
+    out.extend(hits(&list.rows, &picks));
+    let take = widgets::list(&mut c, t, f, list.bottom + m.card_gap, &[Row::new(l.pick(PICK_HERE)).tint(t.pal.accent)]);
+    out.extend(hits(&take.rows, &[Action::ChooseFolder]));
+    Frame::new(t, c, out, l.pick(BROWSE_FOLDER), top)
+}
+
 /// The order the file manager lists entries in: what they are put in order
 /// by, which way, and whether folders stand before files.
 /// A block of a page laid out: its lines, where they start on the page, and
@@ -3388,7 +3423,7 @@ pub fn browser(cx: &Ctx) -> Frame {
         picks.push(Action::BrowseBack);
     }
     let shown = match b.at.is_empty() {
-        true => l.pick(BROWSE_HINT).to_string(),
+        true => b.url.clone(),
         false => b.at.clone(),
     };
     rows.push(Row::new(&shown).icon(BLUE, Icon::Globe));
@@ -3397,6 +3432,8 @@ pub fn browser(cx: &Ctx) -> Frame {
         rows.push(Row::new(l.pick(BROWSE_RELOAD)));
         picks.push(Action::BrowseReload);
     }
+    rows.push(Row::new(l.pick(BROWSE_FOLDER)).trail(Trail::Value(&s.browse_folder)));
+    picks.push(Action::Open(Screen::PickFolder));
     let rows_h = m.row_h * rows.len() as f32;
     let mut y = top + rows_h + m.dp(8.0);
     let measure = Canvas::new(2, 2);
@@ -3449,11 +3486,34 @@ pub fn browser(cx: &Ctx) -> Frame {
             y += h + m.dp(10.0);
         }
     }
+    // A file taken from a link, and how that goes.
+    let mut taking: Option<(Rect, f32)> = None;
+    if let Fetch::Running { name, done, total, rate } = &s.fetch {
+        let (came, all) = (fmt::file_size(*done), fmt::file_size(*total));
+        let line = tr!(l, "正在下载 {name}：{came} / {all}", "正在下載 {name}：{came} / {all}", "Downloading {name}: {came} of {all}");
+        y += m.dp(10.0);
+        let lines = widgets::wrap(&measure, &f.body, &line, m.sub_px, max_w);
+        let h = lines.len() as f32 * m.sub_pitch;
+        placed.push(Placed { lines, top: y, pitch: m.sub_pitch, px: m.sub_px, kind: Kind::Note });
+        y += h + m.dp(6.0);
+        let share = match *total {
+            0 => 0.0,
+            all => (*done as f32 / all as f32).clamp(0.0, 1.0),
+        };
+        let bar = Rect::new(x, y, max_w, m.dp(6.0));
+        taking = Some((bar, share));
+        let _ = rate;
+        y += bar.h + m.dp(10.0);
+    }
     let bottom = y + m.dp(10.0);
     let mut c = sheet(cx, fitted(t, bottom), t.pal.bg);
     let mut out = Vec::new();
     let list = widgets::list(&mut c, t, f, top, &rows);
     out.extend(hits(&list.rows, &picks));
+    if let Some((bar, share)) = taking {
+        c.fill_round_rect(bar.x, bar.y, bar.w, bar.h, bar.h / 2.0, t.pal.track);
+        c.fill_round_rect(bar.x, bar.y, (bar.w * share).max(bar.h), bar.h, bar.h / 2.0, t.pal.accent);
+    }
     for p in &placed {
         let (face, ink) = match &p.kind {
             Kind::Heading => (&f.heading, t.pal.text),

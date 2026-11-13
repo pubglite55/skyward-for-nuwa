@@ -149,6 +149,8 @@ pub enum Screen {
     /// The recovery's own browser: an address, and what the page at it says
     /// in its markup, its links a finger can follow.
     Browser,
+    /// Choosing the folder a file taken from the web is saved in.
+    PickFolder,
 }
 
 /// How far asking the update server for the newest system has come.
@@ -951,9 +953,16 @@ pub enum Fetch {
     Failed(String),
 }
 
+/// Where the browser's files are saved until the pages are told otherwise.
+pub const BROWSER_FOLDER: &str = "/sdcard/Download";
+
+/// The page the browser comes to with nothing asked of it: the search page
+/// the phone's own browser opens on.
+const BROWSE_HOME: &str = "https://cn.bing.com/";
+
 /// The recovery's own browser: the address it is at, the page it made of it,
 /// and the pages gone through to get here.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Browse {
     /// What the address field holds, ready to be edited.
     pub url: String,
@@ -966,6 +975,21 @@ pub struct Browse {
     pub history: Vec<String>,
     /// The address field is being typed in: the keys are up.
     pub typing: bool,
+}
+
+impl Default for Browse {
+    /// A browser with nothing shown yet, its field holding the page it opens
+    /// on.
+    fn default() -> Self {
+        Browse {
+            url: BROWSE_HOME.to_string(),
+            at: String::new(),
+            page: None,
+            status: BrowseStatus::Idle,
+            history: Vec::new(),
+            typing: false,
+        }
+    }
 }
 
 /// How reading the page at an address stands.
@@ -1332,6 +1356,12 @@ pub enum Action {
     BrowseBack,
     /// Read this page again.
     BrowseReload,
+    /// Open the folder at this entry of the one the picker shows.
+    PickInto(usize),
+    /// Up to the folder the one shown is in.
+    PickUp,
+    /// Save the files taken from the web in the folder shown.
+    ChooseFolder,
     /// Put the file manager's entries in order by this.
     SortBy(SortKey),
     /// Turn that order round, or back.
@@ -1786,6 +1816,8 @@ pub struct State {
     pub fetch_portal: Option<String>,
     /// The recovery's own browser.
     pub browser: Browse,
+    /// The folder a file taken from the web is saved in.
+    pub browse_folder: String,
     /// The order the file manager lists a folder's entries in: what they
     /// are put in order by, whether the order is turned round, and whether
     /// folders stand before files.
@@ -1977,6 +2009,7 @@ impl Default for State {
             fetch_url: String::new(),
             fetch_portal: None,
             browser: Browse::default(),
+            browse_folder: BROWSER_FOLDER.to_string(),
             fetch: Fetch::Idle,
             // The stock file manager's own order to start with: folders
             // first, then by name.
@@ -5121,6 +5154,12 @@ impl App {
         self.say(&why, now);
     }
 
+    /// Something the browser has to say that is not about the page shown: a
+    /// file that could not be taken, and why.
+    pub fn browse_note(&mut self, why: String, now: u64) {
+        self.say(&why, now);
+    }
+
     /// Read the page at `url`, the pages gone through so far kept to go
     /// back to. Nothing is asked of the network here: the runtime reads it
     /// and tells [`App::browsed`].
@@ -5548,6 +5587,15 @@ impl App {
                 }
             }
             Screen::Decrypt if matches!(self.state.data, Data::Closed | Data::Failed(_)) => self.open_data(),
+            // The picker shows the folder files are saved in, and the browser
+            // opens on the page it comes to with nothing asked of it.
+            Screen::PickFolder => vec![Effect::ReadDir(self.state.browse_folder.clone())],
+            Screen::Browser if self.state.browser.page.is_none() && matches!(self.state.browser.status, BrowseStatus::Idle) && !self.state.browser.url.is_empty() => {
+                let b = &mut self.state.browser;
+                b.at = b.url.clone();
+                b.status = BrowseStatus::Loading;
+                vec![Effect::Browse(b.at.clone())]
+            }
             // The files are what the page is about: the partition they are
             // in is opened as the page opens, so that turning the switch
             // needs nothing else.
@@ -5638,6 +5686,38 @@ impl App {
                 if !url.is_empty() {
                     return self.browse_to(url, now);
                 }
+            }
+            // The folder a file taken from the web is saved in: the picker
+            // walks the folders of internal storage, and takes the one it
+            // shows.
+            Action::PickInto(i) => {
+                let (name, folder) = {
+                    let entry = self.state.files.entry(i);
+                    (entry.name.clone(), matches!(entry.kind, FileKind::Folder { .. } | FileKind::Link { folder: true, .. }))
+                };
+                if folder {
+                    let path = self.state.files.inside(&name);
+                    self.state.files.path = path.clone();
+                    self.refresh();
+                    return vec![Effect::ReadDir(path)];
+                }
+            }
+            Action::PickUp => {
+                let here = self.state.files.path.clone();
+                let up = match std::path::Path::new(&here).parent() {
+                    Some(parent) if !parent.as_os_str().is_empty() => parent.to_string_lossy().into_owned(),
+                    _ => here,
+                };
+                if up != self.state.files.path {
+                    self.state.files.path = up.clone();
+                    self.refresh();
+                    return vec![Effect::ReadDir(up)];
+                }
+            }
+            Action::ChooseFolder => {
+                self.state.browse_folder = self.state.files.path.clone();
+                self.refresh();
+                return self.back(now);
             }
             Action::Skip => {
                 self.leave(true);

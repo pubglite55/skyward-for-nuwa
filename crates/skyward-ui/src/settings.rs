@@ -58,6 +58,9 @@ pub struct Settings {
     /// The password of the network joined last is kept, so that the start
     /// after this one joins it without asking.
     pub wlan_keep: bool,
+    /// The folder a file taken from the web is saved in, as an absolute
+    /// path.
+    pub browse_folder: String,
     pub install: Install,
     pub backup: Backup,
     pub logs: Logs,
@@ -159,6 +162,7 @@ impl Settings {
             remember: state.remember,
             wlan_auto: state.wlan_auto,
             wlan_keep: state.wlan_keep,
+            browse_folder: state.browse_folder.clone(),
             install: Install { check_signature: state.check_signature, keep_recovery: state.keep_recovery },
             backup: Backup {
                 parts: names(&state.backup, &PARTS),
@@ -235,6 +239,9 @@ impl Settings {
         state.remember = self.remember;
         state.wlan_auto = self.wlan_auto;
         state.wlan_keep = self.wlan_keep;
+        if self.browse_folder.starts_with('/') {
+            state.browse_folder = self.browse_folder.clone();
+        }
         state.sort = SortKey::of(&self.sort.key).unwrap_or_default();
         state.sort_desc = self.sort.desc;
         state.folders_first = self.sort.folders;

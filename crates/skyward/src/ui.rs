@@ -1,5 +1,5 @@
 use crate::backup;
-use crate::browser;
+use crate::browser::{self, Read};
 use crate::credential;
 use crate::decrypt::{self, Decryptor};
 use crate::filework;
@@ -1011,6 +1011,40 @@ const PORTAL_RETRY: Duration = Duration::from_secs(2);
 
 fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
     w.as_ref().context("the phone's WLAN is not brought up")
+}
+
+/// Start taking `url` into `dir` under `name`: the download page and a link
+/// followed in the browser are taken the same way, and told the same way.
+fn start_download(
+    app: &mut App,
+    fetcher: &mut Option<updates::Worker>,
+    servers: Servers,
+    url: String,
+    name: String,
+    dir: PathBuf,
+) -> Result<()> {
+    let made = fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()));
+    let name = match &made {
+        Ok(()) => download::free_name(&dir, &name),
+        Err(_) => name,
+    };
+    let path = dir.join(&name);
+    let started = made.and_then(|()| {
+        skyward_sys::kmsg(&format!("downloading {url} to {}", path.display()))?;
+        updates::Worker::start(updates::Task::FetchUrl { url, name: name.clone(), path }, servers)
+    });
+    match started {
+        Ok(worker) => {
+            *fetcher = Some(worker);
+            app.fetch_started(&name);
+            Ok(())
+        }
+        Err(e) => {
+            let why = skyward_ui::fmt::download_failure(app.state.lang, &Failure::Other(format!("{e:#}")));
+            app.fetch_ended(FetchEnd::Failed(why));
+            Err(e)
+        }
+    }
 }
 
 /// The network whose password is kept, and the password joined with on this
@@ -2102,11 +2136,23 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
             }
             app.wireless_served(server.served());
         }
-        // The page the browser asked for, if it has come since the last look.
+        // What the browser asked for, if it has come since the last look: a
+        // page to show, or a file to take into the folder it saves to.
         let read = page_reader.as_ref().and_then(|f| f.taken());
-        if let Some(page) = read {
+        if let Some(read) = read {
             page_reader = None;
-            app.browsed(page);
+            match read {
+                Ok(Read::Page(page)) => app.browsed(Ok(page)),
+                Ok(Read::File { url, name }) => {
+                    let dir = PathBuf::from(&app.state.browse_folder);
+                    if let Err(e) = start_download(&mut app, &mut fetcher, servers.clone(), url, name, dir) {
+                        skyward_sys::kmsg(&format!("the file the browser found could not be taken: {e:#}"))?;
+                        let why = skyward_ui::fmt::download_failure(app.state.lang, &Failure::Other(format!("{e:#}")));
+                        app.browse_note(why, now);
+                    }
+                }
+                Err(why) => app.browsed(Err(why)),
+            }
         }
         // A link too long for the recovery's keyboard can be typed on
         // another device, which opens a page the phone serves: it runs while
@@ -3008,26 +3054,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     Effect::StartFetch { url, name } => {
                         ensure!(fetcher.is_none(), "a download is under way");
                         let dir = Path::new(skyward_crypto::data::SDCARD).join("Download");
-                        let made = fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()));
-                        let name = match &made {
-                            Ok(()) => download::free_name(&dir, &name),
-                            Err(_) => name,
-                        };
-                        let path = dir.join(&name);
-                        let started = made.and_then(|()| {
-                            skyward_sys::kmsg(&format!("downloading {url} to {}", path.display()))?;
-                            updates::Worker::start(updates::Task::FetchUrl { url, name: name.clone(), path }, servers.clone())
-                        });
-                        match started {
-                            Ok(worker) => {
-                                fetcher = Some(worker);
-                                app.fetch_started(&name);
-                            }
-                            Err(e) => {
-                                skyward_sys::kmsg(&format!("the file could not be downloaded: {e:#}"))?;
-                                let why = skyward_ui::fmt::download_failure(app.state.lang, &Failure::Other(format!("{e:#}")));
-                                app.fetch_ended(FetchEnd::Failed(why));
-                            }
+                        if let Err(e) = start_download(&mut app, &mut fetcher, servers.clone(), url, name, dir) {
+                            skyward_sys::kmsg(&format!("the file could not be downloaded: {e:#}"))?;
                         }
                     }
                     Effect::StopFetch => {
