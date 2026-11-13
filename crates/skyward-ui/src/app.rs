@@ -2084,18 +2084,18 @@ impl State {
 
 /// One finger, in screen pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Touch {
+    Down(f32, f32),
+    Move(f32, f32),
+    Up,
+}
+
 /// The lock over the page: how far its knob has been slid to the right,
 /// from 0 to 1, and when it was raised.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Lock {
     pub drag: f32,
     pub since: u64,
-}
-
-pub enum Touch {
-    Down(f32, f32),
-    Move(f32, f32),
-    Up,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6414,7 +6414,8 @@ impl App {
     /// Where the lock's knob slides: the bar drawn along the foot of the
     /// screen, as the other swipe-to-confirm controls are.
     pub fn lock_track(&self) -> Rect {
-        let m = &self.theme().m;
+        let t = self.theme();
+        let m = &t.m;
         let inset = m.margin + m.dp(14.0);
         Rect::new(inset, m.h as f32 - m.dp(150.0), m.w as f32 - inset * 2.0, m.dp(56.0))
     }
