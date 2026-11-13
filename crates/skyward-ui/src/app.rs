@@ -8461,7 +8461,6 @@ mod tests {
 
     #[test]
     fn the_file_list_takes_the_order_the_pages_choose() {
-        let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Files, W, H, PPD);
         let mut big = entry("big.bin", FileKind::File);
         (big.size, big.modified) = (9_000, 1_700_000_100);
