@@ -395,7 +395,7 @@ pub fn page(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, table: &Table) -> Vec
             table.dropped,
             l.pick(["个更小的分区没有画出。", "個更小的分區沒有畫出。", "smaller partitions are not drawn."]),
         );
-        c.text(&f.body, &said, margin, top + dp(14.0) + ((table.others.len() + 1) / 2) as f32 * row + dp(6.0), dp(12.0), t.pal.subtitle, Some(wide));
+        c.text(&f.body, &said, margin, top + dp(14.0) + table.others.len().div_ceil(2) as f32 * row + dp(6.0), dp(12.0), t.pal.subtitle, Some(wide));
     }
 
     // What the colours mean, in a row under the list.
