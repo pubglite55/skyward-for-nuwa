@@ -389,21 +389,55 @@ pub fn mounted_partitions(slot: Slot) -> Result<Vec<Mounted>> {
     Ok(found.into_iter().map(|(_, m)| m).collect())
 }
 
+/// What taking the slot's partitions off came to.
+#[derive(Debug, Default)]
+pub struct Released {
+    /// Partitions that were in use, and were taken out of the tree at once
+    /// instead of being unmounted. What ran from them keeps its pages.
+    pub forced: Vec<PathBuf>,
+    /// Partitions, or their device-mapper devices, that would not come off,
+    /// each with the reason.
+    pub kept: Vec<(PathBuf, String)>,
+}
+
 /// Take the slot's mounted partitions away before an update writes over
 /// them: unmount them and remove their device-mapper devices. A partition
 /// whose mount point is in `busy` still has files in use; it only leaves
 /// the tree, and those files and its device stay until let go. /metadata
 /// stays mounted for the update.
-pub fn release_partitions(slot: Slot, busy: &[PathBuf]) -> Result<()> {
+///
+/// One that will not unmount is taken out of the tree at once as well,
+/// whatever `busy` says: the recovery runs the phone's own programs from
+/// the installed system, and they are most of what holds it. What still
+/// will not come off is given back rather than ending the install — a
+/// partition in use is the state the recovery itself made, not a fault of
+/// the package.
+pub fn release_partitions(slot: Slot, busy: &[PathBuf]) -> Result<Released> {
+    let mut out = Released::default();
     for m in mounted_partitions(slot)?.into_iter().rev() {
-        if busy.contains(&m.mount_point) {
-            mount::umount_detach_over(&m.mount_point)?;
-        } else {
-            mount::umount_over(&m.mount_point)?;
-            snapshots::unmap_snapshot(&m.partition)?;
+        let in_use = busy.contains(&m.mount_point);
+        let first = if in_use { mount::umount_detach_over(&m.mount_point) } else { mount::umount_over(&m.mount_point) };
+        let off = match first {
+            Ok(()) => true,
+            Err(_) => match mount::umount_detach_over(&m.mount_point) {
+                Ok(()) => {
+                    out.forced.push(m.mount_point.clone());
+                    true
+                }
+                Err(e) => {
+                    out.kept.push((m.mount_point.clone(), format!("{e:#}")));
+                    false
+                }
+            },
+        };
+        if !off {
+            continue;
+        }
+        if let Err(e) = snapshots::unmap_snapshot(&m.partition) {
+            out.kept.push((m.mount_point.clone(), format!("its device stays: {e:#}")));
         }
     }
-    Ok(())
+    Ok(out)
 }
 
 /// Undo `mount_partitions`: unmount the slot's partitions where their own

@@ -988,8 +988,27 @@ fn detach(services: Vec<Service>) -> Detach {
     Box::new(move || {
         let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
         let mounted = skyward_vab::mounted_partitions(slot)?;
-        let busy = services::pin(&services, &mounted)?;
-        skyward_vab::release_partitions(slot, &busy)
+        // Pinning keeps the programs the configuration names in memory.
+        // What cannot be read now is left to the filesystem, which is asked
+        // to take the mount off the tree when it is in use.
+        let busy = match services::pin(&services, &mounted) {
+            Ok(busy) => busy,
+            Err(e) => {
+                let _ = skyward_sys::kmsg(&format!("the programs were not kept in memory: {e:#}"));
+                Vec::new()
+            }
+        };
+        let released = skyward_vab::release_partitions(slot, &busy)?;
+        for at in &released.forced {
+            let _ = skyward_sys::kmsg(&format!("{} was in use, and came off the tree at once", at.display()));
+        }
+        // A partition that would not come off either way is told of, and the
+        // install goes on: being in use is what the recovery makes of the
+        // phone's own programs, not a fault of the package.
+        for (at, why) in &released.kept {
+            let _ = skyward_sys::kmsg(&format!("{} stays where it is: {why}", at.display()));
+        }
+        Ok(())
     })
 }
 

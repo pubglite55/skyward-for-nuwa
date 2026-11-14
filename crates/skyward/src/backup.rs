@@ -540,7 +540,11 @@ fn restore(t: RestoreTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<
     for item in items.iter().filter(|i| matches!(i.part, Part::Boot | Part::Efs)) {
         let device = target(item, slot);
         for point in mount::points_of(skyward_block::devnum(&device)?)? {
-            mount::umount(&point).with_context(|| format!("{} is in use at {}", device.display(), point.display()))?;
+            // One in use still has to be written: it leaves the tree at
+            // once, and what runs from it keeps its pages.
+            if mount::umount(&point).is_err() {
+                mount::umount_detach(&point).with_context(|| format!("{} is in use at {}", device.display(), point.display()))?;
+            }
         }
     }
     if system {
