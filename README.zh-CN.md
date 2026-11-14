@@ -66,6 +66,7 @@ Skyward 是用 Rust 从零编写的 Android recovery：没有 TWRP 的框架，�
 | | 状态 |
 | --- | --- |
 | 启动、界面、触摸、音量键、截图 | 已验证 |
+| 两槽刷入后启动 | 已验证（v2.0.1：`nuwa 2.0.1 recovery up`，misc 为空时直接进首页） |
 | 打开 data 分区 | 已验证（密钥由 Android 17 写出，手机运行 16） |
 | 密钥程序按分区描述启动 | 已验证（qseecomd / ssgtzd / keymint / hwservicemanager / gatekeeper / boot 六个都起） |
 | adb、fastbootd、MTP | 已验证 |
@@ -139,6 +140,15 @@ skyward: the data partition is open: f2fs at /data
 **开不了机，但手机没坏。** 电源 + 音量上进入 recovery，电源 + 音量下进入 fastboot。super 里没有系统时 Skyward 依然能启动，屏幕、按键、adb 和 fastbootd 都在，足够装回一个系统。
 
 **装包时报分区忙。** 已经不报了：恢复自己启动的密钥、触摸、WLAN 程序占着分区时，它把挂载点直接摘下再写，日志里是 `came off the tree at once`。
+
+**电脑上看不见手机。** 设备管理器里明明有 `Android Composite ADB Interface`，`adb devices` 却是空的：电脑上那个常驻的 adb 服务端占着设备句柄，它自己的日志里是 `Failed to open device handle ... Error [5]: 拒绝访问`。把 adb 进程全部结束再起一次就好，手机不用动：
+
+```sh
+taskkill /F /IM adb.exe
+adb start-server
+```
+
+**开机日志里说 WLAN 没起来。** 那是 `the WLAN did not come up: ... No such device`：驱动模块刚加载完、网卡还没注册好，开机那一次自检落空了。`wlan0` 随后就在，WLAN 页的扫描和连接照常。
 
 **adb 不用授权就能访问存储。** 这是设计如此：Skyward 里的 adb 是不需要确认的 root shell。手机处于 recovery 时，任何人拿到手机和数据线都能访问其中的存储。
 

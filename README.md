@@ -104,6 +104,7 @@ in use taken off the tree instead of stopping an install.
 | | State |
 | --- | --- |
 | Booting, the interface, touch, volume keys, screenshots | verified |
+| Flashing both slots, then starting | verified (v2.0.1: `nuwa 2.0.1 recovery up`, and an empty misc lands on the home page) |
 | Opening the data partition | verified (keys made by Android 17, phone on 16) |
 | Key programs started from the partitions' descriptions | verified (qseecomd / ssgtzd / keymint / hwservicemanager / gatekeeper / boot) |
 | adb, fastbootd, MTP | verified |
@@ -206,6 +207,23 @@ starts with its screen, keys, adb and fastbootd — enough to install one.
 **A package stops because a partition is in use.** It no longer does: the
 partitions the recovery's own key, touch and WLAN programs hold are taken off
 the tree before the write, and the log says `came off the tree at once`.
+
+**The computer cannot see the phone.** Device Manager shows
+`Android Composite ADB Interface` and `adb devices` is still empty: the adb
+server that has been running on the computer holds the device's handle, and its
+own log says `Failed to open device handle ... Error [5]: access denied`. End
+every adb process and start one again; the phone stays untouched:
+
+```sh
+taskkill /F /IM adb.exe
+adb start-server
+```
+
+**The boot log says the WLAN did not come up.** That is
+`the WLAN did not come up: ... No such device`: the driver modules had just
+been loaded and the interface was not registered yet, so the one look at start
+found nothing. `wlan0` is there a moment later, and the WLAN page scans and
+joins as usual.
 
 **adb reaches the storage without authorization.** This is by design: adb in
 Skyward is a root shell that asks nothing. Anyone with the phone and a cable
