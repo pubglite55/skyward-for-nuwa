@@ -300,7 +300,15 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-ui`（`app`/`settings`/`pages`/`search`） | 文件管理器排序：高级 → 文件排序，可按名称 / 大小 / 修改时间，升降序，文件夹置顶；排序在界面侧完成，改选即重排已打开的列表，选择写入设置文件（`sort`），下次启动保留 |
 | `crates/skyward-net/src/download.rs`、`crates/skyward/src/updates.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「网络下载」：高级 → 网络下载，输入 `http://` / `https://` 直链，按回车即下到内部存储 `Download/`；支持 `Range` 续传、可停止（已下部分保留，再下同一地址接着下）、同名文件自动加序号不覆盖。为此给下载层加了「无摘要」模式（`Sum::None`，手输地址不带校验值）与文件名推导（`name_from` / `free_name`） |
 
-### 2026-11-14 傍晚 · 密钥链容错、清理、署名，重发 v1.9
+### 2026-11-14 晚 · 安装前卸载分区改为强制
+
+- 现象：装包时 `move off the installed system: unmount /vendor: Device or resource busy (os error 16)`，什么都没写。
+- 原因：`install::detach` → `services::pin` 只盯**配置里**的程序（清理后只剩 post_boot / touch_report / touchsensor）；密钥链（qseecomd、ssgtzd、keymint、gatekeeper、hwservicemanager）与 wpa_supplicant 都是运行时由程序描述启动的，不在这个列表里，于是 /vendor、/mnt/system、/mnt/system_ext 被判为「不忙」，走了严格 `umount`，内核 EBUSY。
+- 改法：`skyward_vab::release_partitions` 对每个挂载点先按原语义卸载，失败即 `umount_detach_over`（惰性卸载，进程保留已映射的页），仍不行就记日志跳过；返回 `Released { forced, devices, kept }` 供调用方写内核日志。`detach` 不再因卸载失败返回错误，`pin` 失败也降级为日志。备份恢复里 boot/EFS 的卸载同样加了惰性兜底。
+- 验证：`adb reboot sideload` + `adb sideload` 一个只含 `META-INF/com/google/android/update-binary` 的测试 zip，日志出现 `/vendor was in use, and came off the tree at once`、`/mnt/system …`、`install: Ran { wipe_cache: false }`，安装走完。
+- 留下的：dm 设备（vendor_a 等）因程序仍持有 fd 无法移除，日志会写 `its device-mapper device stays`；挂载页手动卸载仍按设计拒绝「正在使用」的分区。
+
+## 2026-11-14 傍晚 · 密钥链容错、清理、署名，重发 v1.9
 
 - **容错**：`services::start` 原本遇到第一个起不来的程序就 `bail!`，`keys::start` 逐步调它，于是缺一个就整条链停住（data 解不开，日志只有一行）。改成「每个都试，记第一个原因，最后统一报告」，`bring_up` 里 `services::start` 与 `keys::start` 失败只记日志、继续往下（否则密钥链仍被跳过）。
 - **真机验证方法**（可复用）：把 `devices/nuwa.toml` 里第一个服务路径改成不存在的 `/vendor/bin/not-on-this-phone`，编一版刷进去，看 `ps` 里 `touch_report`/`touchsensor` 是否仍起来、`dmesg` 是否有 `left out of the chain`、`/data` 是否在 10 秒内挂上。验完还原配置再提交（临时提交已压掉）。

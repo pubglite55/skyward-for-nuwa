@@ -395,8 +395,12 @@ pub struct Released {
     /// Partitions that were in use, and were taken out of the tree at once
     /// instead of being unmounted. What ran from them keeps its pages.
     pub forced: Vec<PathBuf>,
-    /// Partitions, or their device-mapper devices, that would not come off,
-    /// each with the reason.
+    /// Partitions that came off the tree, whose device-mapper device would
+    /// not go, each with the reason: a program started from it still has it
+    /// open.
+    pub devices: Vec<(PathBuf, String)>,
+    /// Partitions that would not come off the tree either way, each with
+    /// the reason.
     pub kept: Vec<(PathBuf, String)>,
 }
 
@@ -434,7 +438,7 @@ pub fn release_partitions(slot: Slot, busy: &[PathBuf]) -> Result<Released> {
             continue;
         }
         if let Err(e) = snapshots::unmap_snapshot(&m.partition) {
-            out.kept.push((m.mount_point.clone(), format!("its device stays: {e:#}")));
+            out.devices.push((m.mount_point.clone(), format!("{e:#}")));
         }
     }
     Ok(out)

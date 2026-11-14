@@ -1002,6 +1002,9 @@ fn detach(services: Vec<Service>) -> Detach {
         for at in &released.forced {
             let _ = skyward_sys::kmsg(&format!("{} was in use, and came off the tree at once", at.display()));
         }
+        for (at, why) in &released.devices {
+            let _ = skyward_sys::kmsg(&format!("{} is off the tree, and its device-mapper device stays: {why}", at.display()));
+        }
         // A partition that would not come off either way is told of, and the
         // install goes on: being in use is what the recovery makes of the
         // phone's own programs, not a fault of the package.
