@@ -165,12 +165,14 @@ fn main() -> Result<()> {
             let dark = args.iter().any(|a| a == "--dark");
             let theme = if dark { Theme::dark(w, h, ppd) } else { Theme::light(w, h, ppd) };
             let mut c = Canvas::filled(w, h, theme.pal.bg);
+            let (holding, others) = this_phone();
             map::page(
                 &mut c,
                 &theme,
                 &fonts,
                 lang,
-                &this_phone(),
+                &holding,
+                &others,
                 &map::Data { bytes: 240_518_168_576, used: Some(4_960_000_000) },
             );
             let path = out.join(if dark { "map-dark.png" } else { "map-light.png" });
@@ -1633,28 +1635,28 @@ fn font_path() -> Result<PathBuf> {
 }
 
 /// The partitions this phone has, as the map draws them: `super` holding
-/// the system's own, the firmware the radio runs from, what starts the
-/// phone, and the few small things the phone never looks at. The sizes are
-/// the ones this phone's own table gives; the free room inside `super` is
-/// drawn too, because a package that does not fit is what the map is for.
-fn this_phone() -> Vec<Tile<'static>> {
-    vec![
-        Tile::holding(
-            "super",
-            10_737_418_240,
-            Tone::System,
-            vec![
-                Tile::new("system", 4_509_715_660, Tone::System),
-                Tile::new("vendor", 1_717_986_918, Tone::System),
-                Tile::new("product", 1_288_490_188, Tone::System),
-                Tile::new("system_ext", 966_367_674, Tone::System),
-                Tile::new("odm", 322_122_547, Tone::System),
-                Tile::new("vendor_dlkm", 214_748_364, Tone::System),
-                Tile::new("odm_dlkm", 107_374_182, Tone::System),
-                Tile::new("mi_ext", 21_474_836, Tone::System),
-                Tile::new("free", 1_589_137_871, Tone::Errand),
-            ],
-        ),
+/// the system's own, with the room it has not given out drawn too — a
+/// package that does not fit is what the map is for — and the partitions
+/// that are not the system's beside it, said in a list. The sizes are the
+/// ones this phone's own table gives.
+fn this_phone() -> (Tile<'static>, Vec<Tile<'static>>) {
+    let holding = Tile::holding(
+        "super",
+        10_737_418_240,
+        Tone::System,
+        vec![
+            Tile::new("system", 4_509_715_660, Tone::System),
+            Tile::new("vendor", 1_717_986_918, Tone::System),
+            Tile::new("product", 1_288_490_188, Tone::System),
+            Tile::new("system_ext", 966_367_674, Tone::System),
+            Tile::new("odm", 322_122_547, Tone::System),
+            Tile::new("vendor_dlkm", 214_748_364, Tone::System),
+            Tile::new("odm_dlkm", 107_374_182, Tone::System),
+            Tile::new("mi_ext", 21_474_836, Tone::System),
+            Tile::spare(1_589_137_871),
+        ],
+    );
+    let others = vec![
         Tile::new("modem_a", 268_435_456, Tone::Firmware),
         Tile::new("boot_a", 100_663_296, Tone::Boot),
         Tile::new("metadata", 67_108_864, Tone::Storage),
@@ -1663,7 +1665,8 @@ fn this_phone() -> Vec<Tile<'static>> {
         Tile::new("init_boot_a", 8_388_608, Tone::Boot),
         Tile::new("misc", 1_048_576, Tone::Errand),
         Tile::new("vbmeta_a", 65_536, Tone::Boot),
-    ]
+    ];
+    (holding, others)
 }
 
 fn write_png(path: &Path, canvas: &Canvas) -> Result<()> {
