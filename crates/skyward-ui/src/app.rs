@@ -49,6 +49,11 @@ pub enum Screen {
     Installing,
     About,
     Specs,
+    /// The phone's storage as a map: what the system's own partitions take,
+    /// and what is left of the room outside them.
+    Map,
+    /// One partition of it, said in full: what it is, how big, where it is.
+    Partition,
     /// How long the screen stays on with nothing touched.
     ScreenOff,
     /// Finding a feature or partition by name, typed on the screen's own
@@ -1335,6 +1340,8 @@ pub enum Action {
     BackupTo(Place),
     /// Open a backup found, by its place in the list, to restore it.
     OpenBackup(usize),
+    /// Open the partition at this place in the storage map's own list.
+    OpenPart(usize),
     /// Tick or untick a part of the backup being restored.
     RestorePart(usize),
     /// Stop backing up, or checking a backup before it is restored.
@@ -1790,6 +1797,9 @@ pub struct State {
     pub verify: bool,
     /// The backups found, newest first, those that cannot be read last.
     pub backups: Vec<BackupEntry>,
+    /// The partition the storage map opened, by its place in
+    /// [`crate::map::Table::parts`].
+    pub part_open: usize,
     /// The backup the restore page shows, as it was found, and which of its
     /// parts to restore.
     pub restore: Option<(BackupEntry, [bool; 4])>,
@@ -1959,6 +1969,7 @@ impl Default for State {
             compress: false,
             verify: true,
             backups: Vec::new(),
+            part_open: 0,
             restore: None,
             backup_job: None,
             logs: [true, true],
@@ -5799,6 +5810,10 @@ impl App {
                 self.refresh();
             }
             // All a backup holds is ticked to restore at first.
+            Action::OpenPart(i) => {
+                self.state.part_open = i;
+                self.open(Screen::Partition);
+            }
             Action::OpenBackup(i) => {
                 let entry = self.state.backups[i].clone();
                 let parts = entry.held.as_ref().map_or([false; 4], |h| h.parts);

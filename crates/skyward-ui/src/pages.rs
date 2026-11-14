@@ -74,6 +74,8 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Installing => installing(cx),
         Screen::About => about(cx),
         Screen::Specs => specs(cx),
+        Screen::Map => map_page(cx),
+        Screen::Partition => partition(cx),
         Screen::ScreenOff => screen_off(cx),
         Screen::Search => search(cx),
         Screen::Backup => backup(cx),
@@ -610,6 +612,29 @@ fn about_cards(cx: &Ctx, c: &mut Canvas) -> (Vec<Hit>, f32, f32) {
 }
 
 /// Every reading the recovery has, modelled on the stock「全部参数与信息」.
+/// The phone's storage as a map: the room the system's own partitions take,
+/// and what is left outside them. A tap on a piece of it opens that piece.
+pub fn map_page(cx: &Ctx) -> Frame {
+    let (t, f, l) = (cx.t, cx.f, cx.state.lang);
+    let mut c = page(cx);
+    let table = crate::map::Table::of_this_phone();
+    let spots = crate::map::page(&mut c, t, f, l, table);
+    let out = spots.iter().enumerate().map(|(i, rect)| Hit { rect: *rect, action: Action::OpenPart(i) }).collect();
+    Frame { back: true, ..Frame::new(t, c, out, l.pick(["分区地图", "分區地圖", "Storage map"]), t.m.content_top) }
+}
+
+/// One partition of it, said in full: what it is, how big, where it lives.
+pub fn partition(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = page(cx);
+    let table = crate::map::Table::of_this_phone();
+    let parts = table.parts();
+    if let Some(part) = parts.get(s.part_open) {
+        crate::map::detail(&mut c, t, f, l, part);
+    }
+    Frame { back: true, ..Frame::new(t, c, Vec::new(), l.pick(["分区详情", "分區詳情", "Partition"]), t.m.content_top) }
+}
+
 pub fn specs(cx: &Ctx) -> Frame {
     let (t, f, i, l) = (cx.t, cx.f, cx.info, cx.state.lang);
     let gap = t.m.card_gap;
@@ -686,7 +711,13 @@ pub fn specs(cx: &Ctx) -> Frame {
         Some(free) => tr!(l, "可用存储 {free} / 总存储 {total}", "可用空間 {free} / 總容量 {total}", "{free} free of {total}"),
         None => tr!(l, "总存储 {total} · data 分区未挂载", "總容量 {total} · data 分割區未掛載", "{total} in all · data partition not mounted"),
     };
-    y = widgets::info_card(&mut c, t, f, y + gap, &[(l.pick(["机身存储", "內建儲存空間", "Internal storage"]), storage)]);
+    // The room the phone has, opened onto the map of what takes it.
+    let stores = widgets::list(&mut c, t, f, y + gap, &[Row::new(l.pick(["机身存储", "內建儲存空間", "Internal storage"]))
+        .icon(GREEN, Icon::Mount)
+        .subtitle(&storage)
+        .trail(Trail::Arrow)]);
+    out.extend(hits(&stores.rows, &[Action::Open(Screen::Map)]));
+    y = stores.bottom;
     let links = widgets::list(&mut c, t, f, y + gap, &[
         Row::new(l.pick(LICENSE)).trail(Trail::Value("GPL-3.0")),
         Row::new(l.pick(FONTS)).trail(Trail::Value("MiSans")),

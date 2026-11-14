@@ -21,6 +21,8 @@ jobs:
         run: |
           cargo run --locked -p skyward-preview -- preview-out --map
           cargo run --locked -p skyward-preview -- preview-out --map --dark
+          cargo run --locked -p skyward-preview -- preview-out --map --detail
+          cargo run --locked -p skyward-preview -- preview-out --map --detail --dark
       - uses: actions/upload-artifact@v4
         with:
           name: preview

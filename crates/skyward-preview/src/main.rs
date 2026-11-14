@@ -16,7 +16,7 @@ use skyward_ui::app::{
     SystemsWork, TermEnd, Touch, UsbDrive, UsbLink, SCREEN_OFF,
 };
 use skyward_ui::widgets::{self, Bar, Bolt, Cap, Layer};
-use skyward_ui::map::{self, Tone, Tile};
+use skyward_ui::map::{self, Part, Table, Tone};
 use skyward_ui::{editor, fmt, pages, Canvas, Ctx, Fonts, Lang, Theme};
 use skyward_vab::{BootSlots, FailureCode, Hold, Slot, SnapshotState, Standing};
 use std::fs::File;
@@ -160,22 +160,22 @@ fn main() -> Result<()> {
             return matcher::run(&fonts, Path::new(probes));
         }
         // The storage map, drawn from this phone's own partitions: the room
-        // each takes, `super`'s own standing on it.
+        // each takes, `super`'s own standing on it. `--detail` draws one of
+        // them instead, as tapping it opens it.
         Some("--map") => {
             let dark = args.iter().any(|a| a == "--dark");
+            let detail = args.iter().any(|a| a == "--detail");
             let theme = if dark { Theme::dark(w, h, ppd) } else { Theme::light(w, h, ppd) };
             let mut c = Canvas::filled(w, h, theme.pal.bg);
-            let (holding, others) = this_phone();
-            map::page(
-                &mut c,
-                &theme,
-                &fonts,
-                lang,
-                &holding,
-                &others,
-                &map::Data { bytes: 240_518_168_576, used: Some(4_960_000_000) },
-            );
-            let path = out.join(if dark { "map-dark.png" } else { "map-light.png" });
+            let table = this_phone();
+            let name = if detail { "detail" } else { "map" };
+            if detail {
+                let part = table.parts().into_iter().find(|p| p.name == "system").expect("the sample holds system");
+                map::detail(&mut c, &theme, &fonts, lang, part);
+            } else {
+                map::page(&mut c, &theme, &fonts, lang, &table);
+            }
+            let path = out.join(format!("{name}-{}.png", if dark { "dark" } else { "light" }));
             write_png(&path, &c)?;
             println!("wrote {}", path.display());
             return Ok(());
@@ -1639,34 +1639,35 @@ fn font_path() -> Result<PathBuf> {
 /// package that does not fit is what the map is for — and the partitions
 /// that are not the system's beside it, said in a list. The sizes are the
 /// ones this phone's own table gives.
-fn this_phone() -> (Tile<'static>, Vec<Tile<'static>>) {
-    let holding = Tile::holding(
-        "super",
-        10_737_418_240,
-        Tone::System,
-        vec![
-            Tile::new("system", 4_509_715_660, Tone::System),
-            Tile::new("vendor", 1_717_986_918, Tone::System),
-            Tile::new("product", 1_288_490_188, Tone::System),
-            Tile::new("system_ext", 966_367_674, Tone::System),
-            Tile::new("odm", 322_122_547, Tone::System),
-            Tile::new("vendor_dlkm", 214_748_364, Tone::System),
-            Tile::new("odm_dlkm", 107_374_182, Tone::System),
-            Tile::new("mi_ext", 21_474_836, Tone::System),
-            Tile::spare(1_589_137_871),
-        ],
-    );
-    let others = vec![
-        Tile::new("modem_a", 268_435_456, Tone::Firmware),
-        Tile::new("boot_a", 100_663_296, Tone::Boot),
-        Tile::new("metadata", 67_108_864, Tone::Storage),
-        Tile::new("persist", 33_554_432, Tone::Storage),
-        Tile::new("dtbo_a", 25_165_824, Tone::Boot),
-        Tile::new("init_boot_a", 8_388_608, Tone::Boot),
-        Tile::new("misc", 1_048_576, Tone::Errand),
-        Tile::new("vbmeta_a", 65_536, Tone::Boot),
+fn this_phone() -> Table {
+    let inside = vec![
+        Part { device: Some("/dev/block/dm-0".into()), filesystem: Some("ext4".into()), at: Some("/mnt/system".into()), ..Part::new("system", 4_509_715_660, Tone::System) },
+        Part::new("vendor", 1_717_986_918, Tone::System),
+        Part::new("product", 1_288_490_188, Tone::System),
+        Part::new("system_ext", 966_367_674, Tone::System),
+        Part::new("odm", 322_122_547, Tone::System),
+        Part::new("vendor_dlkm", 214_748_364, Tone::System),
+        Part::new("odm_dlkm", 107_374_182, Tone::System),
+        Part::new("mi_ext", 21_474_836, Tone::System),
+        Part::spare(1_589_137_871),
     ];
-    (holding, others)
+    let others = vec![
+        Part::new("modem_a", 268_435_456, Tone::Firmware),
+        Part::new("boot_a", 100_663_296, Tone::Boot),
+        Part::new("metadata", 67_108_864, Tone::Storage),
+        Part::new("persist", 33_554_432, Tone::Storage),
+        Part::new("dtbo_a", 25_165_824, Tone::Boot),
+        Part::new("init_boot_a", 8_388_608, Tone::Boot),
+        Part::new("misc", 1_048_576, Tone::Errand),
+        Part::new("vbmeta_a", 65_536, Tone::Boot),
+    ];
+    Table {
+        holding: Some(Part::holding("super", 10_737_418_240, Tone::System, inside)),
+        others,
+        dropped: 12,
+        data: Some(Part { filesystem: Some("f2fs".into()), at: Some("/data".into()), ..Part::new("userdata", 240_518_168_576, Tone::Storage) }),
+        used: Some(4_960_000_000),
+    }
 }
 
 fn write_png(path: &Path, canvas: &Canvas) -> Result<()> {
