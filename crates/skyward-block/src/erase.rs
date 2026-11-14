@@ -85,7 +85,10 @@ fn command(device: &Path, filesystem: &str, extras: &[String], casefold: bool, p
     let mut args = Vec::new();
     match filesystem {
         "f2fs" => {
-            args.extend(["-g", "android", "-O", "project_quota,extra_attr"].map(String::from));
+            // `-f` makes it over what is there: a partition being given a
+            // filesystem usually holds one already, and make_f2fs refuses
+            // that with "In use by the system!" without it.
+            args.extend(["-f", "-g", "android", "-O", "project_quota,extra_attr"].map(String::from));
             if casefold {
                 args.extend(["-O", "casefold", "-C", "utf8"].map(String::from));
             }

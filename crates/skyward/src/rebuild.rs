@@ -28,11 +28,12 @@ pub fn data(force: bool) -> Result<()> {
         .context("the phone's table does not name a data partition it encrypts whole")?;
     let device = fstab::device(entry)?;
     let dir = data::key_dir(entry);
-    if !data::holds_nothing(Path::new(&device)) {
-        if !force {
-            bail!("{device} holds something already: say it is to be given a new filesystem to throw it away");
-        }
-        skyward_block::erase::discard(Path::new(&device)).with_context(|| format!("empty {device}"))?;
+    // The filesystem is made over whatever is there; the whole partition is
+    // not discarded first. A discard of every block of it stalls the storage
+    // — the phone was seen to go down under one — and the filesystem being
+    // made afresh loses what was there just the same.
+    if !data::holds_nothing(Path::new(&device)) && !force {
+        bail!("{device} holds something already: say it is to be given a new filesystem to throw it away");
     }
     let metadata = Path::new("/metadata");
     if !mount::is_mount_point(metadata)? {

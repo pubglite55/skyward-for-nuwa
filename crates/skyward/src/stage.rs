@@ -27,10 +27,10 @@ pub const AT: &str = skyward_crypto::data::SDCARD;
 /// The folders the pages expect to find in it.
 const FOLDERS: [&str; 2] = ["Download", "Pictures/Screenshots"];
 
-/// How much memory it may take: half of what the phone has to spare, and
-/// never more than this, so that the recovery itself is not squeezed.
-const MOST: u64 = 6 << 30;
-const LEAST: u64 = 512 << 20;
+/// How much memory it may take: three quarters of what the phone has to
+/// spare, and never less than this, a package being a few gigabytes. The
+/// number is a ceiling, not an asking: pages are taken as they are written.
+const LEAST: u64 = 8 << 30;
 
 /// Whether it is the memory that is shown at [`AT`] now.
 static STAGED: AtomicBool = AtomicBool::new(false);
@@ -76,8 +76,8 @@ pub fn take() -> Result<()> {
     Ok(())
 }
 
-/// How much of the phone's memory can be spared: half of what is free, kept
-/// between [`LEAST`] and [`MOST`].
+/// How much of the phone's memory can be spared: three quarters of what is
+/// free, and never less than [`LEAST`].
 fn room() -> u64 {
     let free = fs::read_to_string("/proc/meminfo")
         .ok()
@@ -89,7 +89,7 @@ fn room() -> u64 {
             })
         })
         .unwrap_or(LEAST * 2);
-    (free / 2).clamp(LEAST, MOST)
+    (free / 4 * 3).max(LEAST)
 }
 
 /// `bytes` as the pages say sizes: whole gigabytes where it makes one.
@@ -112,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn the_room_spared_is_kept_between_the_two_bounds() {
-        assert!((LEAST..=MOST).contains(&room()), "{} is outside the bounds", room());
+    fn the_room_spared_is_never_less_than_a_package() {
+        assert!(room() >= LEAST, "{} is less than a package", room());
     }
 }

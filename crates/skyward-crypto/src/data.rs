@@ -110,6 +110,17 @@ pub fn key_dir(entry: &Entry) -> PathBuf {
     Path::new(entry.extra("keydirectory").unwrap_or(KEY_DIRECTORY)).join(KEY_DIR)
 }
 
+/// Whether the data partition holds nothing at all: no filesystem, and no
+/// key for one either. A partition a factory reset emptied reads as zeros
+/// from its start, and a system makes the filesystem the next time it
+/// starts.
+pub fn empty() -> bool {
+    let Ok(entries) = skyward_block::fstab::read(MOUNT) else { return false };
+    let Some(entry) = skyward_block::fstab::encrypted(&entries) else { return false };
+    let Ok(device) = skyward_block::fstab::device(entry) else { return false };
+    holds_nothing(Path::new(&device))
+}
+
 /// Whether a key is kept for the data partition. Without one nothing opens
 /// it until a system makes it, as the system does the first time it starts:
 /// a partition a factory reset emptied, or one that was never built.
