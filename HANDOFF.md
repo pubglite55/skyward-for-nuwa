@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/pubglite55/skyward-for-nuwa
 - 上游：https://github.com/kirklin/skyward（本仓库已合并 **0.3.0**，代码基线 0.3.0）
-- 当前最新 Release：**nuwa-v1.8**（2026-11-14）。`main` 已合并上游 0.3.0（`6017c8d`），**尚未发版**；发布前需确认解密、触摸、WLAN、安装、备份、双系统逐项复测。
+- 当前最新 Release：**nuwa-v1.9**（2026-11-14，= 上游 0.3.0 + 本 fork 自有功能）；真机已验证启动、密钥链、解密、WLAN；安装 / 备份 / 双系统未在合并后复测。
 - 当前发布分支 `fork/main` 头：与本轮发布同一提交；本地工作分支 `upstream-merge`
 - 设备：小米 13 Pro，代号 **nuwa**，型号 2210132C，SM8550（骁龙 8 Gen 2）
 
