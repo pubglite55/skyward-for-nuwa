@@ -395,11 +395,6 @@ pub struct Service {
     /// directory takes only when they are described to it as well.
     #[serde(default)]
     pub registers: Vec<String>,
-    /// The file that describes what the program registers, where the phone
-    /// keeps that file apart from its other descriptions, as one its init
-    /// puts in place of another on some builds of the hardware.
-    #[serde(default)]
-    pub description: Option<String>,
     /// A service the program registers with the other directory, the one
     /// the phone's hardware services of the older kind use. It is written
     /// as the interface and then which of them it is.
@@ -581,7 +576,7 @@ impl DeviceConfig {
         for s in cfg.services.iter().filter(|s| s.oneshot) {
             let waits = s.ready_property.is_some() || s.ready_service.is_some() || s.ready_hardware_service.is_some();
             ensure!(
-                !waits && s.registers.is_empty() && s.description.is_none(),
+                !waits && s.registers.is_empty(),
                 "[[service]] {}: a program run once is ready when it ends, and registers nothing",
                 s.path
             );
