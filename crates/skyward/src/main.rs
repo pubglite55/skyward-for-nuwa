@@ -127,6 +127,11 @@ enum Cmd {
         #[arg(long, default_value = "/skyward/device.toml")]
         config: String,
     },
+    /// Have the secure world make a key, and print what it made and how
+    /// long it is, without writing anything: what the recovery asks for when
+    /// it builds the data partition, tried on its own.
+    #[cfg(target_os = "android")]
+    Keygen,
     /// Build the data partition afresh where it holds nothing: make the key
     /// it is opened with, as the system does on its first start, and give it
     /// a filesystem.
@@ -315,6 +320,15 @@ fn main() -> Result<()> {
             loop {
                 std::thread::park();
             }
+        }
+        #[cfg(target_os = "android")]
+        Cmd::Keygen => {
+            let binder = skyward_binder::driver::Binder::open()?;
+            let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
+            let blob = service.generate_key()?;
+            println!("the secure world made a key of {} bytes", blob.len());
+            println!("  {}", blob.iter().take(16).map(|b| format!("{b:02x}")).collect::<String>());
+            Ok(())
         }
         #[cfg(target_os = "android")]
         Cmd::RebuildData => {
