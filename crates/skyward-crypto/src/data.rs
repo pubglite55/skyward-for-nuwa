@@ -110,6 +110,21 @@ pub fn key_dir(entry: &Entry) -> PathBuf {
     Path::new(entry.extra("keydirectory").unwrap_or(KEY_DIRECTORY)).join(KEY_DIR)
 }
 
+/// Whether a key is kept for the data partition. Without one nothing opens
+/// it until a system makes it, as the system does the first time it starts:
+/// a partition a factory reset emptied, or one that was never built.
+pub fn key_kept() -> bool {
+    let metadata = Path::new("/metadata");
+    if !mount::is_mount_point(metadata).unwrap_or(false) {
+        // Where the keys are kept is on a partition of its own, mounted for
+        // the moment: it is mounted read-only, which is all a look needs.
+        let _ = mount::mount_ro(&Path::new(skyward_block::BY_NAME).join("metadata"), metadata);
+    }
+    let Ok(entries) = skyward_block::fstab::read(MOUNT) else { return false };
+    let Some(entry) = skyward_block::fstab::encrypted(&entries) else { return false };
+    key_dir(entry).join(KEY_BLOB).exists()
+}
+
 /// Unwrap the key the phone keeps for its data partition and give the
 /// storage hardware the form of it that lasts until the phone is started
 /// again.

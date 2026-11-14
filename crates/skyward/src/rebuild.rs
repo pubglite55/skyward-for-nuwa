@@ -1,24 +1,26 @@
-//! Building the data partition afresh where nothing is left of it.
+//! Giving the data partition a new filesystem, and throwing away the key it
+//! was opened with.
 //!
 //! A phone builds the partition the first time its system starts: the
-//! storage manager makes a key the secure world holds, wraps the partition's
-//! own key with it, and keeps both in /metadata; the system then makes a
-//! filesystem for that key to open. Nothing of that needs the system itself
-//! — only the key service and the tools the recovery already carries — so a
-//! partition a factory reset emptied is built here, and the system that
-//! starts next finds it as it would have found its own.
+//! storage manager has the secure world make a key, wraps the partition's
+//! own key with it, keeps both in /metadata, and makes the filesystem the
+//! key opens. The key is the secure world's to make, and the key service of
+//! this phone takes the phone down when the recovery asks it for one — twice
+//! seen, both times ending in a phone that had to be started again by hand.
+//! So the recovery does the half it can do safely: it empties the partition
+//! and throws the old key away, and the system that starts next makes the
+//! key and the filesystem, as it does on its own first start.
 
 use anyhow::{bail, Context, Result};
 use skyward_block::{fstab, mount, BY_NAME};
 use skyward_crypto::data;
-use skyward_crypto::keymint::KeyMint;
 use std::fs;
 use std::path::Path;
 
-/// Build the data partition afresh: make the key it is opened with, and give
-/// it a filesystem. A partition that still holds anything, or one whose key
-/// is already kept, is left as it is.
-pub fn data(service: &KeyMint, force: bool) -> Result<()> {
+/// Give the data partition a new filesystem and throw away the key it was
+/// opened with. A partition that still holds anything is left as it is,
+/// unless `force` says to throw that away too.
+pub fn data(force: bool) -> Result<()> {
     let entries = fstab::read(data::MOUNT)?;
     let entry = entries
         .iter()
@@ -26,19 +28,11 @@ pub fn data(service: &KeyMint, force: bool) -> Result<()> {
         .context("the phone's table does not name a data partition it encrypts whole")?;
     let device = fstab::device(entry)?;
     let dir = data::key_dir(entry);
-    // Asked for outright, what is there is thrown away first: the key and the
-    // filesystem it opens are both being made anew.
     if !data::holds_nothing(Path::new(&device)) {
         if !force {
-            bail!("{device} holds something already: name it a rebuild to throw it away, or empty it first");
+            bail!("{device} holds something already: say it is to be given a new filesystem to throw it away");
         }
         skyward_block::erase::discard(Path::new(&device)).with_context(|| format!("empty {device}"))?;
-    }
-    if dir.exists() {
-        if !force {
-            bail!("{} already holds the key the partition is opened with", dir.display());
-        }
-        fs::remove_dir_all(&dir).with_context(|| format!("take away {}", dir.display()))?;
     }
     let metadata = Path::new("/metadata");
     if !mount::is_mount_point(metadata)? {
@@ -46,12 +40,16 @@ pub fn data(service: &KeyMint, force: bool) -> Result<()> {
     }
     skyward_vab::metadata_writable(true).context("make /metadata writable")?;
     let built = (|| -> Result<()> {
-        data::make_key(service, &dir)?;
+        // A key kept for a partition that is no longer there would keep the
+        // system from making the key that opens the new one.
+        if dir.exists() {
+            fs::remove_dir_all(&dir).with_context(|| format!("take away {}", dir.display()))?;
+        }
         skyward_block::erase::make(Path::new(&device), &entry.filesystem, &entry.extras, false)
             .with_context(|| format!("make a {} filesystem on {device}", entry.filesystem))?;
         Ok(())
     })();
-    // The metadata goes back to being read-only however the building went.
+    // The metadata goes back to being read-only however it went.
     let again = skyward_vab::metadata_writable(false);
     built?;
     again?;

@@ -30,6 +30,8 @@ mod pty;
 #[cfg(target_os = "android")]
 mod rebuild;
 #[cfg(target_os = "android")]
+mod stage;
+#[cfg(target_os = "android")]
 mod readings;
 #[cfg(target_os = "android")]
 mod relabel;
@@ -127,20 +129,24 @@ enum Cmd {
         #[arg(long, default_value = "/skyward/device.toml")]
         config: String,
     },
-    /// Have the secure world make a key, and print what it made and how
-    /// long it is, without writing anything: what the recovery asks for when
-    /// it builds the data partition, tried on its own.
-    #[cfg(target_os = "android")]
-    Keygen,
-    /// Build the data partition afresh where it holds nothing: make the key
-    /// it is opened with, as the system does on its first start, and give it
-    /// a filesystem.
+    /// Give the data partition a new filesystem where it holds nothing, and
+    /// throw away the key it was opened with: the system that starts next
+    /// makes the key, as it does on its own first start.
     #[cfg(target_os = "android")]
     RebuildData {
-        /// Throw away what the partition holds, if it holds anything, and
-        /// the key it was opened with: a rebuild in earnest.
+        /// Throw away what the partition holds, if it holds anything: a
+        /// rebuild in earnest.
         #[arg(long)]
         force: bool,
+    },
+    /// Show a piece of the phone's memory where its own storage shows, so
+    /// that a package can be brought in while the data partition cannot be
+    /// opened; what is put there is gone at the next restart.
+    #[cfg(target_os = "android")]
+    Stage {
+        /// Take it away again instead of showing it.
+        #[arg(long)]
+        off: bool,
     },
     /// Print what the installed system's partitions say to do to use the
     /// phone's keys, in order, and do none of it. A build of the hardware
@@ -327,20 +333,20 @@ fn main() -> Result<()> {
             }
         }
         #[cfg(target_os = "android")]
-        Cmd::Keygen => {
-            let binder = skyward_binder::driver::Binder::open()?;
-            let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
-            let blob = service.generate_key()?;
-            println!("the secure world made a key of {} bytes", blob.len());
-            println!("  {}", blob.iter().take(16).map(|b| format!("{b:02x}")).collect::<String>());
+        Cmd::Stage { off } => {
+            if off {
+                stage::take()?;
+                println!("/sdcard is no longer the phone's memory");
+            } else if stage::make()? {
+                println!("/sdcard is the phone's memory now: what is put there is gone at the next restart");
+            } else {
+                println!("/sdcard already shows something else");
+            }
             Ok(())
         }
-        #[cfg(target_os = "android")]
         Cmd::RebuildData { force } => {
-            let binder = skyward_binder::driver::Binder::open()?;
-            let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
-            rebuild::data(&service, force)?;
-            println!("the data partition is built afresh");
+            rebuild::data(force)?;
+            println!("the data partition has a new filesystem; the system makes its key when it next starts");
             Ok(())
         }
         #[cfg(target_os = "android")]

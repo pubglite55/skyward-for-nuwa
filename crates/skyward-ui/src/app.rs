@@ -3529,6 +3529,20 @@ impl App {
         self.refresh();
     }
 
+    /// The data partition was given a new filesystem, and the key it was
+    /// opened with thrown away: nothing opens it until a system makes the
+    /// key afresh, as it does the first time it starts.
+    pub fn data_made_afresh(&mut self) {
+        self.state.data = Data::Erased;
+        self.refresh();
+    }
+
+    /// Say `text` over the page for a moment, as a page says something it
+    /// has to tell while it carries on with what it was doing.
+    pub fn notice(&mut self, text: &str, now: u64) {
+        self.say(text, now);
+    }
+
     /// What the user entered did not open their own files: the page asks
     /// again and says why.
     pub fn unlock_failed(&mut self, why: String, now: u64) {

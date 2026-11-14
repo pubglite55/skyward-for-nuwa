@@ -784,11 +784,13 @@ fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&s
         widgets::paragraph(&mut c, t, f, sign_cy + m.dp(88.0), why);
         let again = widgets::button(&mut c, t, f, m.h as f32 * 0.62, l.pick(["重试", "重試", "Try again"]));
         out.push(Hit { rect: again, action: Action::OpenData });
-        // A partition that holds nothing can be built here, as the system
-        // would build it on its first start, rather than waiting for one.
+        // A partition that cannot be read can be given a new filesystem here,
+        // rather than waiting for a system: the key that opens it is the
+        // system's to make when it next starts.
         let build_cy = m.h as f32 * 0.62 + m.dp(58.0);
-        c.text_center(&f.heading, l.pick(["重建 data", "重建 data", "Build data afresh"]), x, build_cy, m.row_title_px, t.pal.accent);
-        out.push(Hit { rect: Rect::new(x - m.dp(90.0), build_cy - m.dp(24.0), m.dp(180.0), m.dp(48.0)), action: Action::RebuildData });
+        c.text_center(&f.heading, l.pick(["格式化 data（清空）", "格式化 data（清空）", "Format data (erase)"]), x, build_cy, m.row_title_px, t.pal.accent);
+        out.push(Hit { rect: Rect::new(x - m.dp(110.0), build_cy - m.dp(24.0), m.dp(220.0), m.dp(48.0)), action: Action::RebuildData });
+        c.text_center(&f.body, l.pick(["系统下次开机时建立密钥", "系統下次開機時建立密鑰", "The system makes its key when it next starts"]), x, build_cy + m.dp(34.0), m.sub_px, t.pal.subtitle);
     }
     let leave_cy = m.h as f32 - m.dp(64.0);
     let leave = l.pick(if matches!(cx.state.data, Data::Open | Data::Erased) { ["完成", "完成", "Done"] } else { NOT_NOW });
