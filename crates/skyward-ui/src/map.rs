@@ -14,6 +14,7 @@ use crate::font::Fonts;
 use crate::geom::Rect;
 use crate::lang::Lang;
 use crate::theme::Theme;
+use crate::tr;
 use crate::Rgba;
 use std::fs;
 use std::path::Path;
@@ -346,7 +347,7 @@ pub fn page(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, table: &Table) -> Vec
     let mut spots = Vec::new();
     // The system's own, drawn: the ground it stands on is a card, and each
     // partition a piece of it.
-    let map = Rect::new(margin, dp(234.0), wide, dp(440.0));
+    let map = Rect::new(margin, dp(234.0), wide, dp(424.0));
     match table.holding.as_ref().filter(|h| !h.inside.is_empty()) {
         Some(holding) => {
             let label = format!("{} · {}", holding.name, size(holding.filled()));
@@ -368,7 +369,15 @@ pub fn page(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, table: &Table) -> Vec
     // What is not the system's, said rather than drawn: a few tens of
     // megabytes each against a gigabyte of system.
     let top = map.y + map.h + dp(34.0);
-    c.text(&f.label, l.pick(["其它分区", "其它分區", "Other partitions"]), margin, top, dp(12.0), t.pal.subtitle, Some(wide));
+    // What was cut from the list is said in its own heading: a note under it
+    // would land on the colours below.
+    let label = if table.dropped == 0 {
+        l.pick(["其它分区", "其它分區", "Other partitions"]).to_string()
+    } else {
+        let n = table.dropped;
+        tr!(l, "其它分区 · 另有 {n} 个更小", "其它分區 · 另有 {n} 個更小", "Other partitions · {n} smaller")
+    };
+    c.text(&f.label, &label, margin, top, dp(12.0), t.pal.subtitle, Some(wide));
     let cell = wide / 2.0;
     let row = dp(38.0);
     for (i, part) in table.others.iter().enumerate() {
@@ -381,16 +390,6 @@ pub fn page(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, table: &Table) -> Vec
         let room = c.text_width(&f.body, &said, dp(12.5));
         c.text(&f.body, &said, x + cell - dp(12.0) - room, y + dp(13.5), dp(12.5), t.pal.value, None);
         spots.push(Rect::new(x, y - dp(4.0), cell, row));
-    }
-
-    if table.dropped > 0 {
-        let said = format!(
-            "{} {} {}",
-            l.pick(["另有", "另有", "and"]),
-            table.dropped,
-            l.pick(["个更小的分区没有画出。", "個更小的分區沒有畫出。", "smaller partitions are not drawn."]),
-        );
-        c.text(&f.body, &said, margin, top + dp(14.0) + table.others.len().div_ceil(2) as f32 * row + dp(6.0), dp(12.0), t.pal.subtitle, Some(wide));
     }
 
     // What the colours mean, in a row under the list.
