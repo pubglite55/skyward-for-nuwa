@@ -138,7 +138,7 @@ pub fn page(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, holding: &Tile, other
     // partition a piece of it.
     let label = format!("{} · {}", holding.name, size(holding.filled()));
     c.text(&f.label, &label, margin, dp(222.0), dp(12.0), t.pal.subtitle, Some(wide));
-    let map = Rect::new(margin, dp(234.0), wide, dp(392.0));
+    let map = Rect::new(margin, dp(234.0), wide, dp(440.0));
     c.fill_round_rect(map.x, map.y, map.w, map.h, dp(16.0), t.pal.card);
     let inner = Rect::new(map.x + dp(10.0), map.y + dp(10.0), map.w - dp(20.0), map.h - dp(20.0));
     land(c, t, f, l, inner, &holding.inside);
@@ -176,7 +176,13 @@ pub fn page(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, holding: &Tile, other
 fn land(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, area: Rect, tiles: &[Tile]) {
     let dp = |v: f32| t.m.dp(v);
     for (tile, rect) in tiles.iter().zip(room(area, tiles)) {
-        let fill = tile.tone.ink().with_alpha(if t.dark { 54 } else { 40 });
+        // The room a partition has not given out is a shadow of a tile, not
+        // a tile: a package that would fit there is what the map is read for.
+        let fill = if tile.counted {
+            tile.tone.ink().with_alpha(if t.dark { 54 } else { 40 })
+        } else {
+            tile.tone.ink().with_alpha(if t.dark { 30 } else { 20 })
+        };
         c.fill_round_rect(rect.x, rect.y, rect.w, rect.h, dp(10.0), fill);
         if !tile.inside.is_empty() {
             let said = format!("{} · {}", tile.name, size(tile.filled()));
@@ -203,12 +209,21 @@ fn name(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, tile: &Tile, rect: Rect) 
     }
     let said = if tile.counted { tile.name } else { l.pick(["空闲", "空閒", "Free"]) };
     let both = rect.h >= dp(58.0) && room >= dp(64.0);
-    let (px, base) = if both { (dp(15.0), rect.y + dp(25.0)) } else { (dp(12.0), rect.y + dp(19.0)) };
-    if rect.h < base - rect.y + dp(4.0) {
+    // A name is written whole or not at all: a smaller size once, then the
+    // colour alone, which says more than `system…` does.
+    let mut px = if both { dp(15.0) } else { dp(12.0) };
+    if c.text_width(&f.heading, said, px) > room {
+        px = dp(10.5);
+        if c.text_width(&f.heading, said, px) > room {
+            return;
+        }
+    }
+    let base = rect.y + px * 1.62;
+    if rect.h < base - rect.y + dp(6.0) {
         return;
     }
     c.text(&f.heading, said, rect.x + pad, base, px, t.pal.text, Some(room));
-    if both {
+    if both && rect.h >= base - rect.y + dp(20.0) {
         let size = size(tile.bytes);
         c.text(&f.body, &size, rect.x + pad, base + dp(18.0), dp(12.0), t.pal.subtitle, Some(room));
     }
