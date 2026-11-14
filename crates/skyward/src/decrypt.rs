@@ -52,7 +52,7 @@ impl Decryptor {
                     Job::Unlock { closed, user, credential } => {
                         Ended::Unlocked(with_key_service(|service| data::unlock(service, &closed, user, &credential)))
                     }
-                    Job::Rebuild => Ended::Rebuilt(with_key_service(crate::rebuild::data)),
+                    Job::Rebuild => Ended::Rebuilt(with_key_service(|service| crate::rebuild::data(service, true))),
                 };
                 // The screen only stops listening once it has let the
                 // thread go.

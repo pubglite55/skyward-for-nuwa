@@ -136,7 +136,12 @@ enum Cmd {
     /// it is opened with, as the system does on its first start, and give it
     /// a filesystem.
     #[cfg(target_os = "android")]
-    RebuildData,
+    RebuildData {
+        /// Throw away what the partition holds, if it holds anything, and
+        /// the key it was opened with: a rebuild in earnest.
+        #[arg(long)]
+        force: bool,
+    },
     /// Print what the installed system's partitions say to do to use the
     /// phone's keys, in order, and do none of it. A build of the hardware
     /// the phone's init names as the phone starts is named first where it
@@ -331,10 +336,10 @@ fn main() -> Result<()> {
             Ok(())
         }
         #[cfg(target_os = "android")]
-        Cmd::RebuildData => {
+        Cmd::RebuildData { force } => {
             let binder = skyward_binder::driver::Binder::open()?;
             let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
-            rebuild::data(&service)?;
+            rebuild::data(&service, force)?;
             println!("the data partition is built afresh");
             Ok(())
         }
