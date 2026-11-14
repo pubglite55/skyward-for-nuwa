@@ -3,8 +3,8 @@
 写给接手这个仓库的 AI / 开发者。目标是让你在**不改动任何代码**的前提下，先准确知道「这是什么、现在到哪一步、哪些坑已经踩过、下一个动作是什么」。
 
 - 仓库：https://github.com/pubglite55/skyward-for-nuwa
-- 上游：https://github.com/kirklin/skyward（本仓库基于 **0.2.0**）
-- 当前最新 Release：**nuwa-v1.8**（2026-11-14，触屏在恢复服务重启后失灵的修复；其余同 v1.7）
+- 上游：https://github.com/kirklin/skyward（本仓库已合并 **0.3.0**，代码基线 0.3.0）
+- 当前最新 Release：**nuwa-v1.8**（2026-11-14）。`main` 已合并上游 0.3.0（`6017c8d`），**尚未发版**；发布前需确认解密、触摸、WLAN、安装、备份、双系统逐项复测。
 - 当前发布分支 `fork/main` 头：与本轮发布同一提交；本地工作分支 `upstream-merge`
 - 设备：小米 13 Pro，代号 **nuwa**，型号 2210132C，SM8550（骁龙 8 Gen 2）
 
@@ -299,7 +299,16 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-ui`（`app`/`settings`/`pages`/`search`） | 文件管理器排序：高级 → 文件排序，可按名称 / 大小 / 修改时间，升降序，文件夹置顶；排序在界面侧完成，改选即重排已打开的列表，选择写入设置文件（`sort`），下次启动保留 |
 | `crates/skyward-net/src/download.rs`、`crates/skyward/src/updates.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「网络下载」：高级 → 网络下载，输入 `http://` / `https://` 直链，按回车即下到内部存储 `Download/`；支持 `Range` 续传、可停止（已下部分保留，再下同一地址接着下）、同名文件自动加序号不覆盖。为此给下载层加了「无摘要」模式（`Sum::None`，手输地址不带校验值）与文件名推导（`name_from` / `free_name`） |
 
-### 2026-11-14 凌晨 · 移植上游触屏唤醒修复，发 v1.8
+### 2026-11-14 下午 · 合并上游 0.3.0（programs / binder / omapi）
+
+- 以 `git merge v0.3.0` 整块合入，保留本 fork 的全部自有功能。
+- 冲突只有 13 个文件，逐个处理：README 留我们；binder 三个文件、`skyward-sys`、`services.rs`、`secure.rs`、`ui.rs` 取上游（ui 另把 `install_asked`/`run`/`read_mounts` 的 `programs` 参数补回我们的版本）；`skyward-config` 取我们（去掉上游对已删机型的测试）；`main.rs` 一处冲突取上游。
+- 上游 `Service` 去掉 `description` 字段，我们的 `programs` 发现模块（config 与 skyward 两处）随之删除，统一由 `skyward-programs` 承担。
+- `devices/nuwa.toml` 只留 `post_boot`、`touch_report`、`touchsensor` 三项；密钥链（qseecomd、ssgtzd、keymint、hwservicemanager、gatekeeper、boot）由手机自己的 init 描述产生。
+- 真机验证（`6017c8d`）：`for the phone's keys: ...` 列出六个程序（比手写多出 `ssgtzd`），五个进程在跑；点「解密」后 `[3586] the data partition is open: f2fs at /data`，`ro.vendor.build.security_patch` 仍报 2099-12-31。
+- 未做/待做：`skyward-pack described` 子命令已可用但 CI 未接（语料已随 crate 合入）；21 机型配置未取回（本 fork 仍只服务 nuwa）；发布待定。
+
+## 2026-11-14 凌晨 · 移植上游触屏唤醒修复，发 v1.8
 
 - 上游 0.3.0 的 `37ef67e`（fix(ui): wake the touchscreen when the recovery service starts again）：`skyward-sys` 记「这次是不是第二次启动」（`keep_log` 时看日志文件在不在，`RUNS_AGAIN`），`ui::run` 在 `Inputs::open` 之前 `surface.rest()` → `present(黑帧)` → `settle()`。
 - 我们这边 `KmsSurface` 的 `rest/present/settle` 与原版同名同义，直接可用；改动落在 `crates/skyward-sys/src/lib.rs` 与 `crates/skyward/src/ui.rs`。
