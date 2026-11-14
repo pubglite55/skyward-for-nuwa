@@ -264,6 +264,7 @@ fn mounted(mounts: &str, device: &str) -> Option<(String, String)> {
 
 /// How much of the partition at `at` is taken, as the filesystem there
 /// counts it. `None` where it is not mounted, or the count cannot be read.
+#[cfg(target_os = "android")]
 fn taken_of(at: &str) -> Option<u64> {
     let path = std::ffi::CString::new(at).ok()?;
     let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
@@ -274,6 +275,13 @@ fn taken_of(at: &str) -> Option<u64> {
     #[allow(clippy::useless_conversion)]
     let (blocks, free) = (u64::from(s.f_blocks), u64::from(s.f_bfree));
     Some(blocks.saturating_sub(free).saturating_mul(s.f_frsize))
+}
+
+/// A computer drawing the pages has no phone's filesystem to ask, and the
+/// pages say `—` there.
+#[cfg(not(target_os = "android"))]
+fn taken_of(_at: &str) -> Option<u64> {
+    None
 }
 
 /// What a partition is for, from the name the phone gives it.
