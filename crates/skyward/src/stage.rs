@@ -35,11 +35,6 @@ const LEAST: u64 = 512 << 20;
 /// Whether it is the memory that is shown at [`AT`] now.
 static STAGED: AtomicBool = AtomicBool::new(false);
 
-/// Whether the phone's storage is the memory shown here.
-pub fn staged() -> bool {
-    STAGED.load(Ordering::Relaxed)
-}
-
 /// The memory shown at [`AT`], where it was not before: `true` where it was
 /// shown now, `false` where the partition that should be there is open, or
 /// something else is already shown there.
@@ -99,7 +94,7 @@ fn room() -> u64 {
 
 /// `bytes` as the pages say sizes: whole gigabytes where it makes one.
 fn spoken(bytes: u64) -> String {
-    if bytes % (1 << 30) == 0 {
+    if bytes.is_multiple_of(1 << 30) {
         format!("{} GB", bytes >> 30)
     } else {
         format!("{} MB", bytes >> 20)
