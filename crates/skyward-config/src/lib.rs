@@ -3,6 +3,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+pub mod programs;
+
 /// Recovery ramdisk files Skyward reads, adds or changes, as archive paths
 /// (they sit under `/` once the kernel unpacks the ramdisk).
 pub mod ramdisk {

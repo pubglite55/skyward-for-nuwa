@@ -22,6 +22,8 @@ mod merge;
 #[cfg(target_os = "android")]
 mod partwork;
 #[cfg(target_os = "android")]
+mod programs;
+#[cfg(target_os = "android")]
 mod pty;
 #[cfg(target_os = "android")]
 mod readings;
@@ -502,7 +504,23 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
             skyward_sys::kmsg(&format!("logd not started: {e:#}"))?;
         }
     }
-    let services: Vec<_> = cfg.services.iter().filter(|s| s.runs_on(&props)).cloned().collect();
+    let mut services: Vec<_> = cfg.services.iter().filter(|s| s.runs_on(&props)).cloned().collect();
+    // Where the configuration names no key service, the phone's own init
+    // scripts say which programs it is made of: another system version, or a
+    // system built by someone else, may keep them elsewhere or call them
+    // something else, and the data partition is opened by them either way.
+    if !services.iter().any(|s| s.path.contains("keymint")) {
+        let found = programs::key_chain();
+        if !found.is_empty() {
+            let named: Vec<&str> = found.iter().map(|s| s.path.as_str()).collect();
+            skyward_sys::kmsg(&format!("the key service is {}, as the phone's own init scripts say", named.join(", ")))?;
+            for program in found {
+                if !services.iter().any(|s| s.path == program.path) {
+                    services.push(program);
+                }
+            }
+        }
+    }
     // The drivers ask for their firmware by name, and the kernel looks only
     // in folders of its own unless told to pass on what it does not find
     // there to ueventd, which looks in the recovery's firmware folders.
