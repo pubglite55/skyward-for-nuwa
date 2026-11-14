@@ -99,17 +99,34 @@ pub fn serves_elements(steps: &[Step]) -> bool {
 ///
 /// `libraries` is a directory of shared libraries every program may need,
 /// searched after whatever it names itself.
+///
+/// A step that cannot be taken does not end the ones after it: a phone
+/// whose system names a program it does not have, or keeps it somewhere
+/// this system's scripts do not say, still has the rest of the chain to
+/// open its data with. The first reason a step was missed is given once
+/// every step has been tried.
 pub fn start(steps: &[Step], libraries: Option<&Path>) -> Result<()> {
+    let mut first: Option<anyhow::Error> = None;
     for step in steps {
-        match step {
-            Step::Start(program) => crate::services::start(std::slice::from_ref(program.as_ref()), libraries)?,
-            Step::ServeElements => {
-                let readers = skyward_omapi::start()?;
-                skyward_sys::kmsg(&format!("{} is served, with a reader for each of {} secure elements: {}", skyward_omapi::SERVICE, readers.len(), readers.join(", ")))?;
-            }
+        let taken = match step {
+            Step::Start(program) => crate::services::start(std::slice::from_ref(program.as_ref()), libraries),
+            Step::ServeElements => serve_the_elements(),
+        };
+        if let Err(e) = taken {
+            let _ = skyward_sys::kmsg(&format!("a step of the key service is left out: {e:#}"));
+            first.get_or_insert(e);
         }
     }
-    Ok(())
+    match first {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// Serve the secure element service, and say which elements read it.
+fn serve_the_elements() -> Result<()> {
+    let readers = skyward_omapi::start()?;
+    skyward_sys::kmsg(&format!("{} is served, with a reader for each of {} secure elements: {}", skyward_omapi::SERVICE, readers.len(), readers.join(", ")))
 }
 
 /// What `steps` are, a line each, as the `keys` command prints them.

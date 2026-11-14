@@ -57,33 +57,52 @@ const LIBRARY_PATH: &str = "LD_LIBRARY_PATH";
 ///
 /// `libraries` is a directory of shared libraries every one of them may
 /// need, searched after whatever it names itself.
+///
+/// Every program is given its chance even after one of them could not be
+/// started: a phone whose system keeps one of them elsewhere, or does not
+/// have it at all, still has the rest, and the rest is what opens its data
+/// partition. The first reason one could not be started is given once all
+/// of them have been tried, so that what went wrong is still told.
 pub fn start(programs: &[Started], libraries: Option<&Path>) -> Result<()> {
     let known = accounts();
+    let mut first: Option<anyhow::Error> = None;
     for program in programs {
-        let (s, who, given) = readied(program, libraries, &known)?;
-        if s.oneshot {
-            let status = to_its_end(&s, &who, &given)?;
-            ensure!(status.success(), "{} {} ended: {status}", s.path, s.args.join(" "));
-            skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
-            continue;
+        if let Err(e) = begin(program, libraries, &known) {
+            let _ = skyward_sys::kmsg(&format!("{} is left out of the chain: {e:#}", program.service.path));
+            first.get_or_insert(e);
         }
-        if program.anew {
-            end_left(&s)?;
-        }
-        // A property the program an earlier run of the recovery service
-        // started has set says nothing of the one started now, which the
-        // programs after it wait for.
-        if let Some(property) = s.ready_property.as_ref().filter(|_| running(&s.path).is_none()) {
-            if skyward_sys::prop(property).is_some_and(|value| !value.is_empty()) {
-                skyward_sys::set_prop(property, "")?;
-            }
-        }
-        let waiting = s.clone();
-        let name = Path::new(&s.path).file_name().map_or_else(|| s.path.clone(), |n| n.to_string_lossy().into_owned());
-        thread::Builder::new().name(name).spawn(move || supervise(&s, &who, &given)).context("start a supervising thread")?;
-        ready(&waiting)?;
     }
-    Ok(())
+    match first {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// Start `program`, and hold up the ones after it until it is what it says
+/// it will be ready with.
+fn begin(program: &Started, libraries: Option<&Path>, known: &HashMap<String, u32>) -> Result<()> {
+    let (s, who, given) = readied(program, libraries, known)?;
+    if s.oneshot {
+        let status = to_its_end(&s, &who, &given)?;
+        ensure!(status.success(), "{} {} ended: {status}", s.path, s.args.join(" "));
+        skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
+        return Ok(());
+    }
+    if program.anew {
+        end_left(&s)?;
+    }
+    // A property the program an earlier run of the recovery service
+    // started has set says nothing of the one started now, which the
+    // programs after it wait for.
+    if let Some(property) = s.ready_property.as_ref().filter(|_| running(&s.path).is_none()) {
+        if skyward_sys::prop(property).is_some_and(|value| !value.is_empty()) {
+            skyward_sys::set_prop(property, "")?;
+        }
+    }
+    let waiting = s.clone();
+    let name = Path::new(&s.path).file_name().map_or_else(|| s.path.clone(), |n| n.to_string_lossy().into_owned());
+    thread::Builder::new().name(name).spawn(move || supervise(&s, &who, &given)).context("start a supervising thread")?;
+    ready(&waiting)
 }
 
 /// Run `program` once to its end and give how it ended, as init runs a

@@ -293,8 +293,18 @@ fn main() -> Result<()> {
             let props = skyward_info::installed_props(slot)?;
             let services: Vec<Started> = DeviceConfig::load(&config)?.services.into_iter().filter(|s| s.runs_on(&props)).map(Started::from).collect();
             let libraries = secure::libraries()?;
-            services::start(&services, libraries.as_deref())?;
-            keys::start(&keys::found(slot, libraries.as_deref())?.steps?, libraries.as_deref())?;
+            // As the recovery itself starts them: what does not start is
+            // left out and told, and the rest is kept running to be looked
+            // at.
+            if let Err(e) = services::start(&services, libraries.as_deref()) {
+                skyward_sys::kmsg(&format!("some of the phone's own programs did not start: {e:#}"))?;
+            }
+            if let Err(e) = keys::found(slot, libraries.as_deref())
+                .and_then(|found| found.steps)
+                .and_then(|steps| keys::start(&steps, libraries.as_deref()))
+            {
+                skyward_sys::kmsg(&format!("some of the key service did not start: {e:#}"))?;
+            }
             loop {
                 std::thread::park();
             }
@@ -603,12 +613,20 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Fou
     if let Some(dir) = &libraries {
         skyward_sys::kmsg(&format!("the phone's own libraries are at {}", dir.display()))?;
     }
-    services::start(&services, libraries.as_deref())?;
+    // What the phone's own system says is started, and one that does not
+    // start is left out rather than ending the rest: the key service is
+    // what opens the data partition, and it is worth starting even where a
+    // program before it could not be.
+    if let Err(e) = services::start(&services, libraries.as_deref()) {
+        skyward_sys::kmsg(&format!("some of the phone's own programs did not start: {e:#}"))?;
+    }
     let steps = found.context("make out from the phone's partitions how its keys are used")?;
     for line in keys::describe(&steps) {
         skyward_sys::kmsg(&format!("for the phone's keys: {}", line.replace("\n  ", ", ")))?;
     }
-    keys::start(&steps, libraries.as_deref())?;
+    if let Err(e) = keys::start(&steps, libraries.as_deref()) {
+        skyward_sys::kmsg(&format!("some of the key service did not start: {e:#}"))?;
+    }
     agree_on_the_notes_key(&registering)
 }
 
