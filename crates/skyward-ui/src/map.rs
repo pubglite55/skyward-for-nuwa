@@ -178,12 +178,15 @@ fn land(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, area: Rect, tiles: &[Tile
     for (tile, rect) in tiles.iter().zip(room(area, tiles)) {
         // The room a partition has not given out is a shadow of a tile, not
         // a tile: a package that would fit there is what the map is read for.
-        let fill = if tile.counted {
-            tile.tone.ink().with_alpha(if t.dark { 54 } else { 40 })
+        // On a page whose card is white the ground has to be laid darker
+        // than on a dark one, or it and the card are the same white.
+        let (fill, edge) = if tile.counted {
+            (tile.tone.ink().with_alpha(if t.dark { 54 } else { 92 }), tile.tone.ink().with_alpha(if t.dark { 96 } else { 84 }))
         } else {
-            tile.tone.ink().with_alpha(if t.dark { 30 } else { 20 })
+            (tile.tone.ink().with_alpha(if t.dark { 30 } else { 44 }), tile.tone.ink().with_alpha(if t.dark { 60 } else { 56 }))
         };
         c.fill_round_rect(rect.x, rect.y, rect.w, rect.h, dp(10.0), fill);
+        c.stroke_round_rect(rect.x, rect.y, rect.w, rect.h, dp(10.0), dp(0.9), edge);
         if !tile.inside.is_empty() {
             let said = format!("{} · {}", tile.name, size(tile.filled()));
             c.text(&f.label, &said, rect.x + dp(12.0), rect.y + dp(17.0), dp(11.5), t.pal.subtitle, Some(rect.w - dp(24.0)));
