@@ -197,39 +197,85 @@ fn land(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, area: Rect, tiles: &[Tile
     }
 }
 
-/// The name of a piece, and its size where there is room for both.
+/// The name of a piece, and its size where there is room for both. A name
+/// too wide for the tile is broken after an underscore and written on two
+/// lines — `system_` over `ext` — and only where that fails is the colour
+/// left to speak alone.
 fn name(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, tile: &Tile, rect: Rect) {
     let dp = |v: f32| t.m.dp(v);
     let pad = dp(11.0);
     let room = rect.w - pad * 2.0;
-    // Narrower than a word, nothing is written: half a name says less than
-    // the colour does.
-    if room <= dp(44.0) {
+    if room <= dp(28.0) {
         return;
     }
     let said = if tile.counted { tile.name } else { l.pick(["空闲", "空閒", "Free"]) };
     let both = rect.h >= dp(58.0) && room >= dp(64.0);
-    // A name is written whole or not at all: a smaller size once, then the
-    // colour alone, which says more than `system…` does. The room asked for
-    // is a shade under what there is, the drawn run being measured a little
-    // wider than the sum of its glyphs.
-    let fits = |c: &Canvas, px: f32| c.text_width(&f.heading, said, px) <= room - dp(6.0);
+    let tall = rect.h - pad * 2.0;
+    // The room asked for is a shade under what there is: a drawn run is
+    // measured a little wider than the sum of its glyphs.
+    let fits = |c: &Canvas, px: f32| c.text_width(&f.heading, said, px) <= room - dp(4.0);
+
     let mut px = if both { dp(15.0) } else { dp(12.0) };
+    let mut lines = vec![said.to_string()];
     if !fits(c, px) {
-        px = dp(10.0);
-        if !fits(c, px) {
-            return;
+        match broken(c, f, said, px, room - dp(4.0)) {
+            Some(broken) if broken.len() > 1 && broken.len() as f32 * px * 1.3 <= tall => lines = broken,
+            _ => {
+                px *= 0.82;
+                if !fits(c, px) {
+                    return;
+                }
+            }
         }
     }
-    let base = rect.y + px * 1.62;
-    if rect.h < base - rect.y + dp(6.0) {
-        return;
+    for (i, line) in lines.iter().enumerate() {
+        let base = rect.y + pad + px * 0.8 + i as f32 * px * 1.3;
+        if base > rect.y + rect.h - dp(2.0) {
+            break;
+        }
+        c.text(&f.heading, line, rect.x + pad, base, px, t.pal.text, Some(room));
     }
-    c.text(&f.heading, said, rect.x + pad, base, px, t.pal.text, Some(room));
-    if both && rect.h >= base - rect.y + dp(20.0) {
+    if both && lines.len() == 1 {
         let size = size(tile.bytes);
-        c.text(&f.body, &size, rect.x + pad, base + dp(18.0), dp(12.0), t.pal.subtitle, Some(room));
+        c.text(&f.body, &size, rect.x + pad, rect.y + pad + px * 2.1, dp(12.0), t.pal.subtitle, Some(room));
     }
+}
+
+/// `name` broken after its underscores into the fewest lines that fit
+/// `room`: `vendor_` over `dlkm` rather than `vendor…`. `None` where a
+/// piece of the name is already wider than the room.
+fn broken(c: &Canvas, f: &Fonts, name: &str, px: f32, room: f32) -> Option<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (i, ch) in name.char_indices() {
+        if ch == '_' {
+            parts.push(&name[start..=i]);
+            start = i + 1;
+        }
+    }
+    if start < name.len() {
+        parts.push(&name[start..]);
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut now = String::new();
+    for part in parts {
+        let tried = format!("{now}{part}");
+        if c.text_width(&f.heading, &tried, px) <= room {
+            now = tried;
+            continue;
+        }
+        if c.text_width(&f.heading, part, px) > room {
+            return None;
+        }
+        if !now.is_empty() {
+            lines.push(std::mem::take(&mut now));
+        }
+        now = part.to_string();
+    }
+    if !now.is_empty() {
+        lines.push(now);
+    }
+    Some(lines)
 }
 
 /// How much room a piece takes, as the piece itself would say it: gigabytes
