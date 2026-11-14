@@ -16,7 +16,7 @@ use skyward_ui::app::{
     SystemsWork, TermEnd, Touch, UsbDrive, UsbLink, SCREEN_OFF,
 };
 use skyward_ui::widgets::{self, Bar, Bolt, Cap, Layer};
-use skyward_ui::map::{self, Part, Table, Tone};
+use skyward_ui::map::{self, Part as Ground, Table, Tone};
 use skyward_ui::{editor, fmt, pages, Canvas, Ctx, Fonts, Lang, Theme};
 use skyward_vab::{BootSlots, FailureCode, Hold, Slot, SnapshotState, Standing};
 use std::fs::File;
@@ -1641,31 +1641,31 @@ fn font_path() -> Result<PathBuf> {
 /// ones this phone's own table gives.
 fn this_phone() -> Table {
     let inside = vec![
-        Part { device: Some("/dev/block/dm-0".into()), filesystem: Some("ext4".into()), at: Some("/mnt/system".into()), ..Part::new("system", 4_509_715_660, Tone::System) },
-        Part::new("vendor", 1_717_986_918, Tone::System),
-        Part::new("product", 1_288_490_188, Tone::System),
-        Part::new("system_ext", 966_367_674, Tone::System),
-        Part::new("odm", 322_122_547, Tone::System),
-        Part::new("vendor_dlkm", 214_748_364, Tone::System),
-        Part::new("odm_dlkm", 107_374_182, Tone::System),
-        Part::new("mi_ext", 21_474_836, Tone::System),
-        Part::spare(1_589_137_871),
+        Ground { device: Some("/dev/block/dm-0".into()), filesystem: Some("ext4".into()), at: Some("/mnt/system".into()), ..Ground::new("system", 4_509_715_660, Tone::System) },
+        Ground::new("vendor", 1_717_986_918, Tone::System),
+        Ground::new("product", 1_288_490_188, Tone::System),
+        Ground::new("system_ext", 966_367_674, Tone::System),
+        Ground::new("odm", 322_122_547, Tone::System),
+        Ground::new("vendor_dlkm", 214_748_364, Tone::System),
+        Ground::new("odm_dlkm", 107_374_182, Tone::System),
+        Ground::new("mi_ext", 21_474_836, Tone::System),
+        Ground::spare(1_589_137_871),
     ];
     let others = vec![
-        Part::new("modem_a", 268_435_456, Tone::Firmware),
-        Part::new("boot_a", 100_663_296, Tone::Boot),
-        Part::new("metadata", 67_108_864, Tone::Storage),
-        Part::new("persist", 33_554_432, Tone::Storage),
-        Part::new("dtbo_a", 25_165_824, Tone::Boot),
-        Part::new("init_boot_a", 8_388_608, Tone::Boot),
-        Part::new("misc", 1_048_576, Tone::Errand),
-        Part::new("vbmeta_a", 65_536, Tone::Boot),
+        Ground::new("modem_a", 268_435_456, Tone::Firmware),
+        Ground::new("boot_a", 100_663_296, Tone::Boot),
+        Ground::new("metadata", 67_108_864, Tone::Storage),
+        Ground::new("persist", 33_554_432, Tone::Storage),
+        Ground::new("dtbo_a", 25_165_824, Tone::Boot),
+        Ground::new("init_boot_a", 8_388_608, Tone::Boot),
+        Ground::new("misc", 1_048_576, Tone::Errand),
+        Ground::new("vbmeta_a", 65_536, Tone::Boot),
     ];
     Table {
-        holding: Some(Part::holding("super", 10_737_418_240, Tone::System, inside)),
+        holding: Some(Ground::holding("super", 10_737_418_240, Tone::System, inside)),
         others,
         dropped: 12,
-        data: Some(Part { filesystem: Some("f2fs".into()), at: Some("/data".into()), ..Part::new("userdata", 240_518_168_576, Tone::Storage) }),
+        data: Some(Ground { filesystem: Some("f2fs".into()), at: Some("/data".into()), ..Ground::new("userdata", 240_518_168_576, Tone::Storage) }),
         used: Some(4_960_000_000),
     }
 }
