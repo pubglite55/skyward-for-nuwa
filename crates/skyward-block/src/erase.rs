@@ -168,20 +168,20 @@ mod tests {
     #[test]
     fn f2fs_is_made_with_androids_defaults_and_project_quota() {
         let c = command(Path::new("/dev/block/by-name/metadata"), "f2fs", &[], false, 4096).unwrap();
-        assert_eq!(c, ("make_f2fs", extras(&["-g", "android", "-O", "project_quota,extra_attr"])));
+        assert_eq!(c, ("make_f2fs", extras(&["-f", "-g", "android", "-O", "project_quota,extra_attr"])));
     }
 
     #[test]
     fn f2fs_folds_case_where_asked_and_compresses_where_the_table_asks() {
         let data = command(Path::new("/dev/x"), "f2fs", &extras(&["check", "fscompress"]), true, 4096).unwrap();
         let wanted = ["-O", "casefold", "-C", "utf8", "-O", "compression", "-O", "extra_attr"];
-        assert_eq!(&data.1[4..], extras(&wanted));
+        assert_eq!(&data.1[5..], extras(&wanted));
     }
 
     #[test]
     fn f2fs_blocks_are_as_large_as_the_kernels_pages() {
         let big = command(Path::new("/dev/x"), "f2fs", &[], false, 16384).unwrap();
-        assert_eq!(&big.1[4..], extras(&["-b", "16384"]));
+        assert_eq!(&big.1[5..], extras(&["-b", "16384"]));
     }
 
     #[test]
