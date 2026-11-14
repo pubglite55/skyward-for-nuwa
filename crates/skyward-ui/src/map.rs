@@ -30,7 +30,7 @@ const MAPPER: &str = "/dev/block/mapper";
 const LISTED: usize = 12;
 
 /// What a piece of the phone is for, and so what it is drawn in.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub enum Tone {
     /// The system's own: `system`, `vendor`, `product`, `system_ext`, `odm`.
     System,
@@ -43,6 +43,7 @@ pub enum Tone {
     Storage,
     /// Room `super` has not given out yet, and the small things the phone
     /// needs and never looks at.
+    #[default]
     Errand,
 }
 
@@ -89,12 +90,6 @@ pub struct Part {
     pub filesystem: Option<String>,
     /// Where it is mounted, where it is.
     pub at: Option<String>,
-}
-
-impl Default for Tone {
-    fn default() -> Self {
-        Tone::Errand
-    }
 }
 
 impl Part {
@@ -205,7 +200,7 @@ fn read() -> Table {
             others.push(part);
         }
     }
-    others.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    others.sort_by_key(|p| std::cmp::Reverse(p.bytes));
     table.dropped = others.len().saturating_sub(LISTED);
     others.truncate(LISTED);
     table.others = others;
@@ -216,7 +211,7 @@ fn read() -> Table {
 }
 
 fn sorted(mut parts: Vec<Part>) -> Vec<Part> {
-    parts.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    parts.sort_by_key(|p| std::cmp::Reverse(p.bytes));
     parts
 }
 
