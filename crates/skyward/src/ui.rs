@@ -4,6 +4,7 @@ use crate::decrypt::{self, Decryptor};
 use crate::filework;
 use crate::haptics::Haptics;
 use crate::relabel;
+use crate::stage;
 use crate::input::{monotonic_ms, Event, Inputs};
 use crate::merge;
 use crate::partwork;

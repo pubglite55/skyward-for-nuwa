@@ -344,6 +344,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        #[cfg(target_os = "android")]
         Cmd::RebuildData { force } => {
             rebuild::data(force)?;
             println!("the data partition has a new filesystem; the system makes its key when it next starts");
