@@ -25,6 +25,12 @@ const FN_KEY_BLOB: &str = "keymaster_key_blob";
 const FN_SECDISCARDABLE: &str = "secdiscardable";
 const FN_STRETCHING: &str = "stretching";
 
+/// The hash of the bytes a key's directory was made over: what its wrapping
+/// is bound to, so that a key copied into another directory does not open.
+pub fn secdiscardable(bytes: &[u8]) -> Vec<u8> {
+    hash_with_prefix(SECDISCARDABLE_PREFIX, bytes)
+}
+
 /// SHA-512 of `data` behind a fixed prefix.
 pub fn hash_with_prefix(prefix: &[u8], data: &[u8]) -> Vec<u8> {
     let mut padded = prefix.to_vec();

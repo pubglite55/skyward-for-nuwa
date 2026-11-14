@@ -128,6 +128,72 @@ fn hardware_key(service: &KeyMint, dir: &Path, wrapped: bool) -> Result<Vec<u8>>
     }
 }
 
+/// The files a key's directory holds, as the phone's own storage manager
+/// writes them: the layout it is in, the key the secure world holds, the
+/// partition's own key wrapped by it, and the bytes the wrapping is bound
+/// to.
+const KEY_VERSION: &str = "1";
+const KEY_BLOB: &str = "keymaster_key_blob";
+const KEY_WRAPPED: &str = "encrypted_key";
+const KEY_SECDISCARDABLE: &str = "secdiscardable";
+
+/// How long the phone's own storage manager makes the key it wraps, the
+/// nonce it wraps it with, and the bytes its directory is bound to.
+const WRAPPED_BYTES: usize = 32;
+const WRAP_NONCE_BYTES: usize = 12;
+const SECDISCARDABLE_BYTES: usize = 16;
+
+/// Build the key the data partition is opened with, where the phone keeps
+/// it: a key the secure world holds, and the partition's own key wrapped by
+/// it, as the phone's storage manager writes them the first time the
+/// partition is built. A directory that holds a key already is never
+/// written over: the partition it opens would be lost with it.
+#[cfg(target_os = "android")]
+pub fn make_key(service: &KeyMint, dir: &Path) -> Result<()> {
+    if dir.exists() {
+        bail!("{} already holds the key the data partition is opened with", dir.display());
+    }
+    let blob = service.generate_key().context("have the secure world make the key the partition is opened with")?;
+    let key = random(WRAPPED_BYTES)?;
+    let bound = random(SECDISCARDABLE_BYTES)?;
+    let app_id = crate::keystore::secdiscardable(&bound);
+    let nonce = random(WRAP_NONCE_BYTES)?;
+    let wrapped = service
+        .gcm_encrypt(&blob, &app_id, &nonce, &key)
+        .context("wrap the key the partition is opened with")?;
+    let mut encrypted = nonce;
+    encrypted.extend_from_slice(&wrapped);
+
+    fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
+    set_mode(dir, 0o700)?;
+    for (name, bytes) in [(KEY_VERSION, KEY_VERSION.as_bytes()), (KEY_BLOB, &blob), (KEY_WRAPPED, &encrypted), (KEY_SECDISCARDABLE, &bound)] {
+        let at = dir.join(name);
+        fs::write(&at, bytes).with_context(|| format!("write {}", at.display()))?;
+        set_mode(&at, 0o600)?;
+    }
+    Ok(())
+}
+
+/// Give `path` the mode the phone's own storage manager gives what it
+/// writes.
+#[cfg(target_os = "android")]
+fn set_mode(path: &Path, mode: u32) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).with_context(|| format!("give {} its mode", path.display()))
+}
+
+/// `len` bytes from the kernel's own source, the way the phone's storage
+/// manager takes the keys it wraps.
+#[cfg(target_os = "android")]
+fn random(len: usize) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = vec![0u8; len];
+    fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut bytes))
+        .context("read from /dev/urandom")?;
+    Ok(bytes)
+}
+
 /// The data partition as [`open`] leaves it.
 pub struct Opened {
     /// The device the partition is read and written through: the decrypted
@@ -173,7 +239,7 @@ fn open(service: &KeyMint) -> Result<Opened> {
 /// not built yet holds. A partition the storage hardware encrypts whole
 /// reads as ciphertext, which is never all zeroes, so this tells an empty
 /// partition from one whose key is missing.
-fn holds_nothing(device: &Path) -> bool {
+pub fn holds_nothing(device: &Path) -> bool {
     use std::io::Read;
     let Ok(mut file) = std::fs::File::open(device) else { return false };
     let mut head = [0u8; 4096];

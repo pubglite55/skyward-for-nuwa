@@ -25,6 +25,7 @@ const DEVICE: &str = "android.hardware.security.keymint.IKeyMintDevice";
 const OPERATION: &str = "android.hardware.security.keymint.IKeyMintOperation";
 
 const GET_HARDWARE_INFO: u32 = 1;
+const GENERATE_KEY: u32 = 3;
 const UPGRADE_KEY: u32 = 6;
 const CONVERT_STORAGE_KEY: u32 = 13;
 const GET_KEY_CHARACTERISTICS: u32 = 14;
@@ -100,6 +101,7 @@ fn builds_named(os: Option<(u32, u32)>) -> String {
     }
 }
 
+const PURPOSE_ENCRYPT: i32 = 0;
 const PURPOSE_DECRYPT: i32 = 1;
 const ALGORITHM_AES: i32 = 32;
 const KEY_BITS: i32 = 256;
@@ -334,7 +336,7 @@ impl<'a> KeyMint<'a> {
         // nothing of the phone's own is changed by reading it here.
         let mut said = Vec::new();
         for os in [builds_to_try()[0], None] {
-            match self.upgrade(key_blob, |call| Self::gcm_params(call, app_id, nonce, os)) {
+            match self.upgrade(key_blob, |call| Self::gcm_params(call, PURPOSE_DECRYPT, app_id, nonce, os)) {
                 Ok(renewed) => {
                     let operation = self.begin(&renewed, app_id, nonce, note, os)?;
                     return self.run(&operation, body);
@@ -348,6 +350,38 @@ impl<'a> KeyMint<'a> {
             ),
             None => "renew the key for the firmware running now".to_string(),
         })
+    }
+
+    /// Have the key service make a key of its own and give the blob it is
+    /// held as: an AES key for wrapping, asked for as the phone's own
+    /// storage manager asks when it builds the key the data partition is
+    /// opened with.
+    #[cfg(target_os = "android")]
+    pub fn generate_key(&self) -> Result<Vec<u8>> {
+        let mut call = Parcel::call(DEVICE);
+        call.i32(6);
+        parameter(&mut call, TAG_ALGORITHM, Value::Enum(VALUE_ALGORITHM, ALGORITHM_AES));
+        parameter(&mut call, TAG_KEY_SIZE, Value::Integer(KEY_BITS));
+        parameter(&mut call, TAG_PURPOSE, Value::Enum(VALUE_KEY_PURPOSE, PURPOSE_ENCRYPT));
+        parameter(&mut call, TAG_PURPOSE, Value::Enum(VALUE_KEY_PURPOSE, PURPOSE_DECRYPT));
+        parameter(&mut call, TAG_BLOCK_MODE, Value::Enum(VALUE_BLOCK_MODE, BLOCK_MODE_GCM));
+        parameter(&mut call, TAG_PADDING, Value::Enum(VALUE_PADDING_MODE, PADDING_NONE));
+        // The key attests nothing, so no attestation key is named.
+        call.i32(0);
+        let reply = self.device.transact(GENERATE_KEY, &call).context("have the key service make a key")?;
+        let mut read = reply.read();
+        status::ok(&mut read).context("have the key service make a key")?;
+        read.blob().context("read the key the key service made")
+    }
+
+    /// Encrypt `body` under `key_blob`, with the application id it is bound
+    /// to and `nonce`, and give the ciphertext with its tag behind it.
+    #[cfg(target_os = "android")]
+    pub fn gcm_encrypt(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], body: &[u8]) -> Result<Vec<u8>> {
+        // A key just made is made by the firmware running now, so no build
+        // is named: the service measures it against its own.
+        let operation = self.begin_as(PURPOSE_ENCRYPT, key_blob, app_id, nonce, None, None).context("start an encryption")?;
+        self.run(&operation, body)
     }
 
     /// Read `body` out with an operation the service started.
@@ -366,7 +400,7 @@ impl<'a> KeyMint<'a> {
     /// with, and a binding to nothing named is not the same to it as none
     /// named at all, so naming an empty one leaves it unable to unwrap a
     /// key that was made bound to nothing.
-    fn gcm_params(call: &mut Parcel, app_id: &[u8], nonce: &[u8], os: Option<(u32, u32)>) {
+    fn gcm_params(call: &mut Parcel, purpose: i32, app_id: &[u8], nonce: &[u8], os: Option<(u32, u32)>) {
         call.i32(if app_id.is_empty() { 7 } else { 8 } + if os.is_some() { 2 } else { 0 });
         // The key's algorithm and size are part of what an operation is
         // checked against, as the phone's own vold gives them: a secure
@@ -380,7 +414,7 @@ impl<'a> KeyMint<'a> {
             parameter(call, TAG_APPLICATION_ID, Value::Blob(app_id));
         }
         parameter(call, TAG_NONCE, Value::Blob(nonce));
-        parameter(call, TAG_PURPOSE, Value::Enum(VALUE_KEY_PURPOSE, PURPOSE_DECRYPT));
+        parameter(call, TAG_PURPOSE, Value::Enum(VALUE_KEY_PURPOSE, purpose));
         // The build the operation is made under. The secure world measures
         // a key's own build against it and refuses a key older than it
         // until the key is renewed, so naming the wrong build closes the
@@ -393,10 +427,17 @@ impl<'a> KeyMint<'a> {
 
     /// Open a decryption with the key service and keep hold of it.
     fn begin(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], note: Option<&Token>, os: Option<(u32, u32)>) -> Result<Handle<'a>> {
+        self.begin_as(PURPOSE_DECRYPT, key_blob, app_id, nonce, note, os)
+    }
+
+    /// Open an operation of `purpose` with the key service and keep hold of
+    /// it: a decryption of a key the phone keeps, or the encryption that
+    /// makes one.
+    fn begin_as(&self, purpose: i32, key_blob: &[u8], app_id: &[u8], nonce: &[u8], note: Option<&Token>, os: Option<(u32, u32)>) -> Result<Handle<'a>> {
         let mut call = Parcel::call(DEVICE);
-        call.i32(PURPOSE_DECRYPT);
+        call.i32(purpose);
         call.blob(key_blob);
-        Self::gcm_params(&mut call, app_id, nonce, os);
+        Self::gcm_params(&mut call, purpose, app_id, nonce, os);
         // A key guarded by the screen lock takes the note the secure world
         // wrote when the user answered it; one that is not guarded takes
         // nothing, and is refused nothing for carrying a note either.

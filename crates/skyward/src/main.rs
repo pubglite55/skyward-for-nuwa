@@ -28,6 +28,8 @@ mod partwork;
 #[cfg(target_os = "android")]
 mod pty;
 #[cfg(target_os = "android")]
+mod rebuild;
+#[cfg(target_os = "android")]
 mod readings;
 #[cfg(target_os = "android")]
 mod relabel;
@@ -125,6 +127,11 @@ enum Cmd {
         #[arg(long, default_value = "/skyward/device.toml")]
         config: String,
     },
+    /// Build the data partition afresh where it holds nothing: make the key
+    /// it is opened with, as the system does on its first start, and give it
+    /// a filesystem.
+    #[cfg(target_os = "android")]
+    RebuildData,
     /// Print what the installed system's partitions say to do to use the
     /// phone's keys, in order, and do none of it. A build of the hardware
     /// the phone's init names as the phone starts is named first where it
@@ -308,6 +315,14 @@ fn main() -> Result<()> {
             loop {
                 std::thread::park();
             }
+        }
+        #[cfg(target_os = "android")]
+        Cmd::RebuildData => {
+            let binder = skyward_binder::driver::Binder::open()?;
+            let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
+            rebuild::data(&service)?;
+            println!("the data partition is built afresh");
+            Ok(())
         }
         #[cfg(target_os = "android")]
         Cmd::Keys => {
