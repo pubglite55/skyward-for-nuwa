@@ -509,7 +509,12 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     // scripts say which programs it is made of: another system version, or a
     // system built by someone else, may keep them elsewhere or call them
     // something else, and the data partition is opened by them either way.
-    if !services.iter().any(|s| s.path.contains("keymint")) {
+    // A phone whose configuration names the key service still asks its own
+    // scripts for them when `skyward.keys` says `discovered`: that is how a
+    // system built differently is diagnosed, and how what its scripts say is
+    // checked against what the configuration says.
+    let discovered = skyward_sys::prop("skyward.keys").as_deref() == Some("discovered");
+    if discovered || !services.iter().any(|s| s.path.contains("keymint")) {
         let found = programs::key_chain();
         if !found.is_empty() {
             let named: Vec<&str> = found.iter().map(|s| s.path.as_str()).collect();
