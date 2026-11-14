@@ -125,7 +125,7 @@ pub fn page(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, tiles: &[Tile], data:
 
     c.text(&f.label, l.pick(["系统与固件", "系統與韌體", "System and firmware"]), margin, dp(222.0), dp(12.0), t.pal.subtitle, Some(wide));
     let area = Rect::new(margin, dp(234.0), wide, t.m.h as f32 - dp(234.0) - dp(74.0));
-    land(c, t, f, l, area, tiles);
+    land(c, t, f, area, tiles);
 
     // What the colours mean, in a row under the map.
     let base = t.m.h as f32 - dp(40.0);
@@ -140,7 +140,7 @@ pub fn page(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, tiles: &[Tile], data:
 }
 
 /// Draw `tiles` into `area`, each with what stands on it.
-fn land(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, area: Rect, tiles: &[Tile]) {
+fn land(c: &mut Canvas, t: &Theme, f: &Fonts, area: Rect, tiles: &[Tile]) {
     let dp = |v: f32| t.m.dp(v);
     for (tile, rect) in tiles.iter().zip(room(area, tiles)) {
         let fill = tile.tone.ink().with_alpha(if t.dark { 54 } else { 40 });
@@ -155,7 +155,7 @@ fn land(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, area: Rect, tiles: &[Tile
         c.text(&f.label, &said, rect.x + dp(12.0), rect.y + dp(17.0), dp(11.5), t.pal.subtitle, Some(rect.w - dp(24.0)));
         let inner = Rect::new(rect.x + dp(8.0), rect.y + dp(26.0), rect.w - dp(16.0), rect.h - dp(34.0));
         if inner.h > dp(16.0) && inner.w > dp(16.0) {
-            land(c, t, f, l, inner, &tile.inside);
+            land(c, t, f, inner, &tile.inside);
         }
     }
 }
