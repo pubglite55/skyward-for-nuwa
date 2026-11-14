@@ -65,10 +65,12 @@ jobs:
           cat > notes.md <<NOTES
           # Skyward for nuwa · 小米 13 Pro
 
-          基于 kirklin/skyward 0.2.0 的移植版，只服务小米 13 Pro（nuwa），commit ${GITHUB_SHA::7}。
+          基于 kirklin/skyward 0.3.0 的移植版，只服务小米 13 Pro（nuwa），commit ${GITHUB_SHA::7}。
           开机进首页，data 分区按需打开：点「解密」或直接进「文件」时才会去解。
 
           ## 解密
+          - **密钥程序由手机自己的分区描述启动**：按 init 脚本与 vintf manifest 读出声明的程序、运行身份、
+            就绪条件与注册的服务（监听、keymint、gatekeeper、weaver、安全元件等），不再由配置手写
           - **跨代密钥**：手机跑的系统比 data 新也能开（如 Android 17 / 补丁 2099-12-31 写出的数据），
             恢复时写 \`ro.vendor.build.security_patch\` 等三个属性，解除 keymint 的 -62 KEY_REQUIRES_UPGRADE
           - 任意系统版本的 fstab 都能找到 data 条目（只取前 5 列、容忍多余列、按 \`metadata_encryption\` 选）
@@ -90,8 +92,8 @@ jobs:
           ## 兼容性
           - 适用固件基线 **OS3.0.312.0.WMBCNXM**（内核随该原厂包）；更早或更晚的系统请按对应固件另行构建
           - 小米官方系统更新会覆盖 recovery 分区：**更新后请重新刷入本恢复（两个槽位）**
-          - 密钥程序的路径随系统版本不同也能找到：配置里的程序不在原位置时按候选路径查找，找不到就跳过并记日志，恢复照常启动
-          - 密钥程序以手机自己的 init 脚本为准：启动时读出并写进内核日志；配置里同类的一项让位，其余照旧
+          - 密钥程序以手机自己的分区描述为准，系统版本不同也能对上；找不到的程序记日志后跳过，恢复照常启动
+          - 换过系统或刷过移植 ROM 的机器，启动时会在内核日志列出它读到的密钥程序，便于排查
 
           ## 其它
           安装 zip / OTA / img、adb sideload、系统更新合并、Skyward 自更新（多镜像测速换源）、
