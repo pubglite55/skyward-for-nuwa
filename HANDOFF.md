@@ -302,6 +302,19 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 
 #- 第三次重发（18:10）：`nuwa-v1.9` 顶到 `3b34ec9`，zip sha256 `eb867c20…`；两槽刷入，真机 `nuwa 1.9`、密钥链 6 条；用 `grep -c "came off the tree at once" /system/bin/recovery` 确认镜像里就是新逻辑。
 
+## 2026-11-14 深夜 · 照 TWRP 的做法：data 打不开时用内存顶内部存储
+
+- **参考对象**：用户给的 `recovery.img`（TWRP，boot v4 / lz4 legacy，ramdisk 157 MB）。解出来看到 TWRP 的两条关键做法：
+  1. **密钥栈整个塞进 ramdisk**：`vendor/bin/qseecomd`、`vendor/bin/hw/android.hardware.security.keymint-service-qti`、`gatekeeper@1.0-service-qti`、`vendor/lib64/libqtikeymint.so` 等，全部自带；`init.recovery.qcom.rc` 用 `on property:vendor.sys.listeners.registered=true` 起 gatekeeper 与 keymint，`seclabel u:r:recovery:s0`、`LD_LIBRARY_PATH=/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin`。所以 **vendor 分区不在也能解密**。
+  2. **密钥由自己造**：`system/bin/recovery` 里链进了 vold 的 `KeyStorage`（`createSecdiscardable` / `readSecdiscardable` / `keymaster_key_blob` / `/metadata/vold/metadata_encryption`），格式化 data 后自己造 key，再提示「You may need to reboot recovery to be able to use /data again.」。fstab：`metadata_encryption=aes-256-xts:wrappedkey_v0`、`keydirectory=/metadata/vold/metadata_encryption`。
+  3. 打包的刷机包放 `/tmp`（tmpfs），所以没有 /data 也能 sideload/安装。
+- **我们的坑**：`recovery keygen`（keymint AIDL `generateKey`）在这台机器上**两次把整机弄挂**（USB 直接消失，要手动重启），说明这颗 TEE 不接受我们这条生成路径。TWRP 用的是它自带的 keymint + vold/keystore2 的封装，不能直接照搬。
+- **因此改为**：
+  - 新增 `crates/skyward/src/stage.rs`：data 无密钥（`data::key_kept()`）或打开失败时，把内存（可用内存一半，512 MB–6 GB）挂到 `/sdcard`，建 `Download`、`Pictures/Screenshots`；打开 data 前用 `umount_detach` 摘掉；重启即清空。这样无线传输 8080、MTP、文件页、安装页在**没有 data 时全部可用**——等价于 TWRP 的 /tmp，但落在我们已有的路径上。
+  - `rebuild::data` 不再造 key：只清空 userdata + 删掉旧密钥目录 + 建 f2fs；密钥交给系统下次开机自己建（与 TWRP 格式化后的终态一致，少了它那步造 key）。失败页按钮改名「格式化 data（清空）」，并注明「系统下次开机时建立密钥」。
+  - `recovery stage` / `recovery stage --off` 可手动开关内存盘；`recovery rebuild-data [--force]` 只做格式化。
+  - 另修：`ui.rs` 里 `detach(cfg.services.clone())` 改为 `detach(programs.to_vec())`（合并上游后遗留，导致安装前 pin 的是配置里的三个程序而不是真正在跑的密钥链）。
+
 ## 2026-11-14 晚 · 安装前卸载分区改为强制
 
 - 现象：装包时 `move off the installed system: unmount /vendor: Device or resource busy (os error 16)`，什么都没写。
