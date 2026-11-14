@@ -129,6 +129,11 @@ enum Cmd {
         #[arg(long, default_value = "/skyward/device.toml")]
         config: String,
     },
+    /// Ask the key service for the key the data partition is built with, and
+    /// keep nothing: the request the recovery makes when it builds a
+    /// partition, tried on its own, with no partition written.
+    #[cfg(target_os = "android")]
+    Keygen,
     /// Give the data partition a new filesystem where it holds nothing, and
     /// throw away the key it was opened with: the system that starts next
     /// makes the key, as it does on its own first start.
@@ -349,6 +354,14 @@ fn main() -> Result<()> {
             } else {
                 println!("/sdcard already shows something else");
             }
+            Ok(())
+        }
+        #[cfg(target_os = "android")]
+        Cmd::Keygen => {
+            let binder = skyward_binder::driver::Binder::open()?;
+            let service = skyward_crypto::keymint::KeyMint::open(&binder)?;
+            let bytes = skyward_crypto::data::try_key(&service)?;
+            println!("the key service made a key of {bytes} bytes, and nothing was written");
             Ok(())
         }
         #[cfg(target_os = "android")]

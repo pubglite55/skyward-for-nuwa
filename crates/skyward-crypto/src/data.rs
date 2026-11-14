@@ -168,7 +168,7 @@ const KEY_SECDISCARDABLE: &str = "secdiscardable";
 /// nonce it wraps it with, and the bytes its directory is bound to.
 const WRAPPED_BYTES: usize = 32;
 const WRAP_NONCE_BYTES: usize = 12;
-const SECDISCARDABLE_BYTES: usize = 16;
+const SECDISCARDABLE_BYTES: usize = 16 * 1024;
 
 /// Build the key the data partition is opened with, where the phone keeps
 /// it: a key the secure world holds, and the partition's own key wrapped by
@@ -180,10 +180,19 @@ pub fn make_key(service: &KeyMint, dir: &Path) -> Result<()> {
     if dir.exists() {
         bail!("{} already holds the key the data partition is opened with", dir.display());
     }
-    let blob = service.generate_key().context("have the secure world make the key the partition is opened with")?;
-    let key = random(WRAPPED_BYTES)?;
+    // What the key is bound to is made first: the secure world is asked for
+    // a key that only this directory can use.
     let bound = random(SECDISCARDABLE_BYTES)?;
     let app_id = crate::keystore::secdiscardable(&bound);
+    // Rollback resistance where the secure world offers it, as the phone's
+    // own storage manager asks, and without it where it does not.
+    let blob = match service.generate_key(Some(&app_id), true) {
+        Ok(blob) => blob,
+        Err(_) => service
+            .generate_key(Some(&app_id), false)
+            .context("have the secure world make the key the partition is opened with")?,
+    };
+    let key = random(WRAPPED_BYTES)?;
     let nonce = random(WRAP_NONCE_BYTES)?;
     let wrapped = service
         .gcm_encrypt(&blob, &app_id, &nonce, &key)
@@ -199,6 +208,22 @@ pub fn make_key(service: &KeyMint, dir: &Path) -> Result<()> {
         set_mode(&at, 0o600)?;
     }
     Ok(())
+}
+
+/// Ask the secure world for the key the data partition would be built with,
+/// and keep nothing of it: a phone whose key service refuses the request
+/// says so before any partition is written.
+#[cfg(target_os = "android")]
+pub fn try_key(service: &KeyMint) -> Result<usize> {
+    let bound = random(SECDISCARDABLE_BYTES)?;
+    let app_id = crate::keystore::secdiscardable(&bound);
+    let blob = match service.generate_key(Some(&app_id), true) {
+        Ok(blob) => blob,
+        Err(first) => service
+            .generate_key(Some(&app_id), false)
+            .with_context(|| format!("asked without rollback resistance after: {first:#}"))?,
+    };
+    Ok(blob.len())
 }
 
 /// Give `path` the mode the phone's own storage manager gives what it

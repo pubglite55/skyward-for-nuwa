@@ -105,6 +105,7 @@ const PURPOSE_ENCRYPT: i32 = 0;
 const PURPOSE_DECRYPT: i32 = 1;
 const ALGORITHM_AES: i32 = 32;
 const KEY_BITS: i32 = 256;
+const MAC_BITS: i32 = 128;
 const BLOCK_MODE_GCM: i32 = 32;
 const PADDING_NONE: i32 = 1;
 
@@ -120,11 +121,15 @@ const TAG_APPLICATION_ID: i32 = -1_879_047_591;
 const TAG_NONCE: i32 = -1_879_047_191;
 /// The build the key belongs to and its patch level, as the phone's own
 /// key broker hands them over with a renewal.
+const TAG_MIN_MAC_LENGTH: i32 = 805_306_376;
+const TAG_NO_AUTH_REQUIRED: i32 = 1_879_048_695;
+const TAG_ROLLBACK_RESISTANCE: i32 = 1_879_048_223;
 const TAG_OS_VERSION: i32 = 805_307_073;
 const TAG_OS_PATCHLEVEL: i32 = 805_307_074;
 
 /// Which arm of a parameter's value is used.
 const VALUE_ALGORITHM: i32 = 1;
+const VALUE_BOOL: i32 = 10;
 const VALUE_PADDING_MODE: i32 = 3;
 const VALUE_KEY_PURPOSE: i32 = 7;
 const VALUE_INTEGER: i32 = 11;
@@ -135,6 +140,7 @@ const VALUE_BLOCK_MODE: i32 = 2;
 enum Value<'a> {
     Enum(i32, i32),
     Integer(i32),
+    Bool(bool),
     Blob(&'a [u8]),
 }
 
@@ -156,6 +162,10 @@ fn parameter(p: &mut Parcel, tag: i32, value: Value) {
         Value::Integer(v) => {
             p.i32(VALUE_INTEGER);
             p.i32(v);
+        }
+        Value::Bool(v) => {
+            p.i32(VALUE_BOOL);
+            p.i32(i32::from(v));
         }
         Value::Blob(v) => {
             p.i32(VALUE_BLOB);
@@ -353,19 +363,29 @@ impl<'a> KeyMint<'a> {
     }
 
     /// Have the key service make a key of its own and give the blob it is
-    /// held as: an AES key for wrapping, asked for as the phone's own
+    /// held as: an AES key for wrapping, asked for the way the phone's own
     /// storage manager asks when it builds the key the data partition is
-    /// opened with.
+    /// opened with — bound to `app_id`, usable without a screen lock being
+    /// answered, and rollback resistant where `rollback` says to ask for it.
     #[cfg(target_os = "android")]
-    pub fn generate_key(&self) -> Result<Vec<u8>> {
+    pub fn generate_key(&self, app_id: Option<&[u8]>, rollback: bool) -> Result<Vec<u8>> {
         let mut call = Parcel::call(DEVICE);
-        call.i32(6);
+        // Eight parameters, and one more for each thing asked for on top.
+        call.i32(8 + i32::from(app_id.is_some()) + i32::from(rollback));
         parameter(&mut call, TAG_ALGORITHM, Value::Enum(VALUE_ALGORITHM, ALGORITHM_AES));
         parameter(&mut call, TAG_KEY_SIZE, Value::Integer(KEY_BITS));
         parameter(&mut call, TAG_PURPOSE, Value::Enum(VALUE_KEY_PURPOSE, PURPOSE_ENCRYPT));
         parameter(&mut call, TAG_PURPOSE, Value::Enum(VALUE_KEY_PURPOSE, PURPOSE_DECRYPT));
         parameter(&mut call, TAG_BLOCK_MODE, Value::Enum(VALUE_BLOCK_MODE, BLOCK_MODE_GCM));
         parameter(&mut call, TAG_PADDING, Value::Enum(VALUE_PADDING_MODE, PADDING_NONE));
+        parameter(&mut call, TAG_MIN_MAC_LENGTH, Value::Integer(MAC_BITS));
+        parameter(&mut call, TAG_NO_AUTH_REQUIRED, Value::Bool(true));
+        if let Some(app_id) = app_id {
+            parameter(&mut call, TAG_APPLICATION_ID, Value::Blob(app_id));
+        }
+        if rollback {
+            parameter(&mut call, TAG_ROLLBACK_RESISTANCE, Value::Bool(true));
+        }
         // The key attests nothing, so no attestation key is named.
         call.i32(0);
         let reply = self.device.transact(GENERATE_KEY, &call).context("have the key service make a key")?;
