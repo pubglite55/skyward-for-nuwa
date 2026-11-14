@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/pubglite55/skyward-for-nuwa
 - 上游：https://github.com/kirklin/skyward（本仓库已合并 **0.3.0**，代码基线 0.3.0）
-- 当前最新 Release：**nuwa-v1.9**（2026-11-14 第三次发，`3b34ec9`，= 上游 0.3.0 + 本 fork 自有功能 + 密钥链容错 + 清理 + 署名 + 安装前强制摘除分区）；真机已验证启动、密钥链、解密、WLAN、缺程序容错、sideload 安装；备份 / 双系统未在合并后复测。
+- 当前最新 Release：**nuwa-v2.0.1**（2026-11-14，`4b290d2`）。相对 v1.9：data 打不开时用内存顶 `/sdcard`（可用内存 3/4、下限 8 GB）、`recovery stage/--force/--off`、格式化只做「清空+删旧密钥+建文件系统」、`make_f2fs -f`、命令不再被当成「再起一个服务」、README 换成仓库自绘的六张页面图（按本机型配置）。
 - 署名：上游 **Kirk Lin** / 本移植 **xiuxiu391**，README（中英）、关于页（`AUTHOR`）、许可证页（`LICENSE_ORIGINAL`）、发布说明都已写上。
 - 当前发布分支 `fork/main` 头：与本轮发布同一提交；本地工作分支 `upstream-merge`
 - 设备：小米 13 Pro，代号 **nuwa**，型号 2210132C，SM8550（骁龙 8 Gen 2）
@@ -301,6 +301,16 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-net/src/download.rs`、`crates/skyward/src/updates.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「网络下载」：高级 → 网络下载，输入 `http://` / `https://` 直链，按回车即下到内部存储 `Download/`；支持 `Range` 续传、可停止（已下部分保留，再下同一地址接着下）、同名文件自动加序号不覆盖。为此给下载层加了「无摘要」模式（`Sum::None`，手输地址不带校验值）与文件名推导（`name_from` / `free_name`） |
 
 #- 第三次重发（18:10）：`nuwa-v1.9` 顶到 `3b34ec9`，zip sha256 `eb867c20…`；两槽刷入，真机 `nuwa 1.9`、密钥链 6 条；用 `grep -c "came off the tree at once" /system/bin/recovery` 确认镜像里就是新逻辑。
+
+## 2026-11-14 深夜（二）· v2.0.1
+
+- 内存盘尺寸按用户要求改成「可用内存 3/4，且不少于 8 GB」，真机实测 `tmpfs 8.0G /sdcard` + `Download`/`Pictures` + `adb push` 成功。
+- `stage` 触发条件改为 `data::empty()`（前 4 KiB 全零），正常机器不再被内存盖住。
+- `main()` 修：`name == "recovery"` 且**无参数**才起服务；此前任何 `recovery <cmd>` 都是再起一个服务，抢 DRM/输入，整机挂。之前「keygen 弄挂手机」的结论作废。
+- 格式化两个 bug：`make_f2fs` 缺 `-f`（已有文件系统时报 `In use by the system!`）；重建前整盘 `BLKSECDISCARD`（实测导致重启两次，已删）。
+- 密钥生成试过：修正 ALGORITHM 的 tag 类型位后，`generateKey` 仍会让整机掉线约一分钟（安全世界不接受），**放弃在恢复里造 key**，密钥交给系统。
+- 预览工具 `nezha()` 之前硬编码成「17 Ultra / OS4.0.4.0.XPACNXM」，改为取配置（13 Pro / OS3.0.312.0.WMBCNXM），重绘 242 张；README 选用 `docs/images/{home,decrypt,install,files,backup,settings}.png`（720 宽、调色板压缩，共约 220 KB）。
+- 发布 `nuwa-v2.0.1`（tag 打在 `4b290d2`）。
 
 ## 2026-11-14 深夜 · 照 TWRP 的做法：data 打不开时用内存顶内部存储
 
