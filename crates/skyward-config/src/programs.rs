@@ -71,7 +71,7 @@ pub fn in_order(mut found: Vec<Service>) -> Vec<Service> {
 }
 
 /// What `path` is, where it is one of the key service's programs.
-fn kind_of(path: &str) -> Option<Kind> {
+pub fn kind_of(path: &str) -> Option<Kind> {
     let name = path.rsplit('/').next().unwrap_or(path);
     if name.contains("keymint") {
         Some(Kind::Keymint)

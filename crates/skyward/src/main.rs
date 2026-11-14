@@ -505,24 +505,20 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
         }
     }
     let mut services: Vec<_> = cfg.services.iter().filter(|s| s.runs_on(&props)).cloned().collect();
-    // Where the configuration names no key service, the phone's own init
-    // scripts say which programs it is made of: another system version, or a
-    // system built by someone else, may keep them elsewhere or call them
-    // something else, and the data partition is opened by them either way.
-    // A phone whose configuration names the key service still asks its own
-    // scripts for them when `skyward.keys` says `discovered`: that is how a
-    // system built differently is diagnosed, and how what its scripts say is
-    // checked against what the configuration says.
-    let discovered = skyward_sys::prop("skyward.keys").as_deref() == Some("discovered");
-    if discovered || !services.iter().any(|s| s.path.contains("keymint")) {
-        let found = programs::key_chain();
-        if !found.is_empty() {
-            let named: Vec<&str> = found.iter().map(|s| s.path.as_str()).collect();
-            skyward_sys::kmsg(&format!("the key service is {}, as the phone's own init scripts say", named.join(", ")))?;
-            for program in found {
-                if !services.iter().any(|s| s.path == program.path) {
-                    services.push(program);
-                }
+    // The phone's own init scripts say which programs its key service is
+    // made of, and how each runs. What they say is taken over what the
+    // configuration says of the same kind: the phone's own system is the
+    // one that opens its data, and a system built differently keeps the
+    // programs elsewhere, or calls them something else.
+    let found = programs::key_chain();
+    if !found.is_empty() {
+        let named: Vec<&str> = found.iter().map(|s| s.path.as_str()).collect();
+        skyward_sys::kmsg(&format!("the key service is {}, as the phone's own init scripts say", named.join(", ")))?;
+        for program in found {
+            let kind = skyward_config::programs::kind_of(&program.path);
+            services.retain(|s| skyward_config::programs::kind_of(&s.path) != kind || s.path == program.path);
+            if !services.iter().any(|s| s.path == program.path) {
+                services.push(program);
             }
         }
     }
