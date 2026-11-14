@@ -1282,6 +1282,9 @@ pub enum Action {
     Skip,
     /// Try opening the data partition again, after it did not open.
     OpenData,
+    /// Build the data partition afresh where it holds nothing: make the key
+    /// it is opened with, and give it a filesystem.
+    RebuildData,
     /// Stop taking the file the download page is taking.
     StopFetch,
     /// Take the address out of /sdcard/Download/link.txt, where a computer
@@ -2190,6 +2193,8 @@ pub enum Effect {
     /// List the folder at this path from the top of a place, to choose a
     /// file to install in, telling what it holds with [`App::set_place`].
     ReadPlace(Place, String),
+    /// Build the data partition afresh, and open it after.
+    RebuildData,
     /// Open the data partition as far as it opens with nothing a user
     /// knows, telling what waits with [`App::data_waiting`] or why it did
     /// not open with [`App::data_failed`].
@@ -5481,11 +5486,21 @@ impl App {
     }
 
     /// Open the data partition, the decrypt page saying so meanwhile.
-    fn open_data(&mut self) -> Vec<Effect> {
+    pub fn open_data(&mut self) -> Vec<Effect> {
         self.state.data = Data::Opening;
         self.state.opening = 0.0;
         self.refresh();
         vec![Effect::OpenData]
+    }
+
+    /// Build the data partition afresh, as the system builds it the first
+    /// time it starts, and open it after: the page shows the work as it
+    /// would show the opening.
+    fn rebuild_data(&mut self) -> Vec<Effect> {
+        self.state.data = Data::Opening;
+        self.state.opening = 0.0;
+        self.refresh();
+        vec![Effect::RebuildData]
     }
 
     /// Carry out a tapped control.
@@ -5507,6 +5522,7 @@ impl App {
                 return self.arrive_at(s);
             }
             Action::OpenData => return self.open_data(),
+            Action::RebuildData => return self.rebuild_data(),
             Action::StopFetch => return vec![Effect::StopFetch],
             Action::FetchFromFile => return vec![Effect::FetchFromFile],
             Action::Skip => {

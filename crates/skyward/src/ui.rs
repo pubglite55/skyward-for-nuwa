@@ -2369,6 +2369,16 @@ pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, r
                     // What the file page listed before /data opened is stale.
                     relist_after_open(&mut app)?;
                 }
+                decrypt::Ended::Rebuilt(Ok(())) => {
+                    skyward_sys::kmsg("the data partition is built afresh: its key is made and its filesystem too")?;
+                    // What was just built is opened the way any partition is.
+                    app.open_data();
+                    decryptor = Some(Decryptor::start(decrypt::Job::Open)?);
+                }
+                decrypt::Ended::Rebuilt(Err(why)) => {
+                    skyward_sys::kmsg(&format!("the data partition was not built: {why}"))?;
+                    app.data_failed(why);
+                }
                 decrypt::Ended::Opened(Err(why)) => {
                     skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
                     // The update the system asked for cannot be read, and
@@ -2664,6 +2674,13 @@ pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, r
                     Effect::OpenData => {
                         ensure!(decryptor.is_none(), "the data partition is being opened already");
                         decryptor = Some(Decryptor::start(decrypt::Job::Open)?);
+                    }
+                    // The page asks for the partition to be built where it
+                    // holds nothing: the key is made, the filesystem too, and
+                    // what was built is opened as any other partition is.
+                    Effect::RebuildData => {
+                        ensure!(decryptor.is_none(), "the data partition is being worked on already");
+                        decryptor = Some(Decryptor::start(decrypt::Job::Rebuild)?);
                     }
                     Effect::Unlock { user, code } => {
                         ensure!(decryptor.is_none(), "the data partition is being opened already");

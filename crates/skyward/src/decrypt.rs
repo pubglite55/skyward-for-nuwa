@@ -16,12 +16,16 @@ pub enum Job {
     /// Open the own files of `user` with what they entered at their screen
     /// lock; `closed` are the users whose own files are still closed.
     Unlock { closed: Vec<Closed>, user: u32, credential: Vec<u8> },
+    /// Build the data partition afresh: make the key it is opened with, as
+    /// the system does on its first start, and give it a filesystem.
+    Rebuild,
 }
 
 /// How a job ended: what it opened, or why it did not.
 pub enum Ended {
     Opened(Result<Opening, String>),
     Unlocked(Result<Vec<Closed>, String>),
+    Rebuilt(Result<(), String>),
 }
 
 pub struct Decryptor {
@@ -48,6 +52,7 @@ impl Decryptor {
                     Job::Unlock { closed, user, credential } => {
                         Ended::Unlocked(with_key_service(|service| data::unlock(service, &closed, user, &credential)))
                     }
+                    Job::Rebuild => Ended::Rebuilt(with_key_service(crate::rebuild::data)),
                 };
                 // The screen only stops listening once it has let the
                 // thread go.
