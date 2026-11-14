@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/pubglite55/skyward-for-nuwa
 - 上游：https://github.com/kirklin/skyward（本仓库已合并 **0.3.0**，代码基线 0.3.0）
-- 当前最新 Release：**nuwa-v1.9**（2026-11-14 重发，= 上游 0.3.0 + 本 fork 自有功能 + 密钥链容错 + 清理 + 署名）；真机已验证启动、密钥链、解密、WLAN、缺程序时的容错；安装 / 备份 / 双系统未在合并后复测。
+- 当前最新 Release：**nuwa-v1.9**（2026-11-14 第三次发，`3b34ec9`，= 上游 0.3.0 + 本 fork 自有功能 + 密钥链容错 + 清理 + 署名 + 安装前强制摘除分区）；真机已验证启动、密钥链、解密、WLAN、缺程序容错、sideload 安装；备份 / 双系统未在合并后复测。
 - 署名：上游 **Kirk Lin** / 本移植 **xiuxiu391**，README（中英）、关于页（`AUTHOR`）、许可证页（`LICENSE_ORIGINAL`）、发布说明都已写上。
 - 当前发布分支 `fork/main` 头：与本轮发布同一提交；本地工作分支 `upstream-merge`
 - 设备：小米 13 Pro，代号 **nuwa**，型号 2210132C，SM8550（骁龙 8 Gen 2）
@@ -300,7 +300,9 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-ui`（`app`/`settings`/`pages`/`search`） | 文件管理器排序：高级 → 文件排序，可按名称 / 大小 / 修改时间，升降序，文件夹置顶；排序在界面侧完成，改选即重排已打开的列表，选择写入设置文件（`sort`），下次启动保留 |
 | `crates/skyward-net/src/download.rs`、`crates/skyward/src/updates.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「网络下载」：高级 → 网络下载，输入 `http://` / `https://` 直链，按回车即下到内部存储 `Download/`；支持 `Range` 续传、可停止（已下部分保留，再下同一地址接着下）、同名文件自动加序号不覆盖。为此给下载层加了「无摘要」模式（`Sum::None`，手输地址不带校验值）与文件名推导（`name_from` / `free_name`） |
 
-### 2026-11-14 晚 · 安装前卸载分区改为强制
+#- 第三次重发（18:10）：`nuwa-v1.9` 顶到 `3b34ec9`，zip sha256 `eb867c20…`；两槽刷入，真机 `nuwa 1.9`、密钥链 6 条；用 `grep -c "came off the tree at once" /system/bin/recovery` 确认镜像里就是新逻辑。
+
+## 2026-11-14 晚 · 安装前卸载分区改为强制
 
 - 现象：装包时 `move off the installed system: unmount /vendor: Device or resource busy (os error 16)`，什么都没写。
 - 原因：`install::detach` → `services::pin` 只盯**配置里**的程序（清理后只剩 post_boot / touch_report / touchsensor）；密钥链（qseecomd、ssgtzd、keymint、gatekeeper、hwservicemanager）与 wpa_supplicant 都是运行时由程序描述启动的，不在这个列表里，于是 /vendor、/mnt/system、/mnt/system_ext 被判为「不忙」，走了严格 `umount`，内核 EBUSY。
