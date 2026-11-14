@@ -1,5 +1,0 @@
-service vendor.face-default /odm/bin/hw/android.hardware.biometrics.face-aidl-service
-    class hal
-    user system
-    group system
-

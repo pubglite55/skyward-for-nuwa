@@ -1,4 +1,0 @@
-service vendor.swap-hal /vendor/bin/hw/vendor.xiaomi.hardware.swap-service
-    class hal
-    user root
-    group root

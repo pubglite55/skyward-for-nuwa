@@ -1,3 +1,0 @@
-on post-fs-data
-    chmod 0444 /dev/mi_dma_dio
-    chown system system /dev/mi_dma_dio

@@ -306,7 +306,8 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 - 上游 `Service` 去掉 `description` 字段，我们的 `programs` 发现模块（config 与 skyward 两处）随之删除，统一由 `skyward-programs` 承担。
 - `devices/nuwa.toml` 只留 `post_boot`、`touch_report`、`touchsensor` 三项；密钥链（qseecomd、ssgtzd、keymint、hwservicemanager、gatekeeper、boot）由手机自己的 init 描述产生。
 - 真机验证（`6017c8d`）：`for the phone's keys: ...` 列出六个程序（比手写多出 `ssgtzd`），五个进程在跑；点「解密」后 `[3586] the data partition is open: f2fs at /data`，`ro.vendor.build.security_patch` 仍报 2099-12-31。
-- 未做/待做：`skyward-pack described` 子命令已可用但 CI 未接（语料已随 crate 合入）；21 机型配置未取回（本 fork 仍只服务 nuwa）；发布待定。
+- 未做/待做：`skyward-pack described` 子命令可用但未接 CI。
+- 2026-11-14 清理：删掉其它 20 个机型的描述语料（13 828 个文件、27 MB），只留 `tests/described/nuwa`；`phones` 测试改为核对 nuwa 的六个密钥程序与顺序；无关远端（`aurora-pr`、`guobao`）与全部旧分支（本地 13 个、远端 5 个）已移除，远端只剩 `main`。
 
 ## 2026-11-14 凌晨 · 移植上游触屏唤醒修复，发 v1.8
 

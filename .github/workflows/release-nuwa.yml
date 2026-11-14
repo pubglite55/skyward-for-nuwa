@@ -65,7 +65,7 @@ jobs:
           cat > notes.md <<NOTES
           # Skyward for nuwa · 小米 13 Pro
 
-          基于 kirklin/skyward 0.3.0 的移植版，只服务小米 13 Pro（nuwa），commit ${GITHUB_SHA::7}。
+          基于 kirklin/skyward 0.3.0 的移植版，由 xiuxiu391 移植与维护，只服务小米 13 Pro（nuwa），commit ${GITHUB_SHA::7}。
           开机进首页，data 分区按需打开：点「解密」或直接进「文件」时才会去解。
 
           ## 解密

@@ -1,4 +1,0 @@
-service checknv /system_ext/bin/checknv
-    user system
-    class late_start
-    oneshot

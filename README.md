@@ -14,6 +14,8 @@ This repository carries Skyward to one phone: the **Xiaomi 13 Pro**
 (codename `nuwa`). Upstream supports other devices:
 [kirklin/skyward](https://github.com/kirklin/skyward).
 
+The port is by [xiuxiu391](https://github.com/xiuxiu391), who keeps it.
+
 ![Skyward on the Xiaomi 13 Pro: About, home, settings and the file manager](docs/overview.webp)
 
 <p align="center">
@@ -157,6 +159,6 @@ tool are in [docs/BUILDING.md](docs/BUILDING.md).
 ## Where it comes from
 
 Skyward is [kirklin/skyward](https://github.com/kirklin/skyward), by kirklin and
-its contributors; this fork follows 0.2.0 and keeps this phone's configuration
-and decryption work. Licensed under
+its contributors; the port to this phone and its upkeep are by **xiuxiu391**,
+on top of upstream 0.3.0. Licensed under
 [GPL-3.0-or-later](LICENSE).

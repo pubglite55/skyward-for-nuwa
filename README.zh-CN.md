@@ -8,6 +8,8 @@ Skyward 是用 Rust 从零编写的 Android recovery：没有 TWRP 的框架，�
 
 这个仓库把它带到一台手机上：**小米 13 Pro**（代号 `nuwa`）。上游支持的其它机型见 [kirklin/skyward](https://github.com/kirklin/skyward)。
 
+这个移植由 [xiuxiu391](https://github.com/xiuxiu391) 完成与维护。
+
 ![在小米 13 Pro 上运行的 Skyward：关于、主页、设置和文件管理](docs/overview.webp)
 
 <p align="center">
@@ -111,4 +113,4 @@ skyward: the data partition stays closed: ... it was made by key format generati
 
 ## 来源
 
-Skyward 来自 [kirklin/skyward](https://github.com/kirklin/skyward)，作者 kirklin 及其贡献者；这个分支跟随 0.2.0，保留本机型的配置与解密工作。许可证为 [GPL-3.0-or-later](LICENSE)。
+Skyward 来自 [kirklin/skyward](https://github.com/kirklin/skyward)，作者 kirklin 及其贡献者；小米 13 Pro（`nuwa`）的移植与维护由 **xiuxiu391** 完成，代码基于上游 0.3.0。许可证为 [GPL-3.0-or-later](LICENSE)。

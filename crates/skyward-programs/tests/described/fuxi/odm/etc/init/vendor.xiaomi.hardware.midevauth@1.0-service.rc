@@ -1,4 +1,0 @@
-service vendor.midevauth /odm/bin/midevauthd
-    class hal
-    user system
-    group system
