@@ -253,14 +253,17 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    // init starts the recovery service by path with no arguments.
+    // init starts the recovery service by path with no arguments. A command
+    // given to the same path is a command: starting the service over a
+    // service already running leaves two of them holding the display, and
+    // the phone does not survive it.
     let started_as = std::env::args_os().next().unwrap_or_default();
     let name = Path::new(&started_as).file_name().unwrap_or_default();
-    if name == "recovery" {
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if name == "recovery" && args.is_empty() {
         return recovery();
     }
     // Install scripts run the commands linked to this binary by their names.
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
     if let Some(code) = skyward_install::commands::run(name, &args) {
         std::process::exit(code);
     }
