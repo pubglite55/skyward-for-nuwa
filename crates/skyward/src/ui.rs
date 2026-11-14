@@ -1340,7 +1340,7 @@ pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, r
     // over the network or from a computer and flashed; it is taken away again
     // before the partition is opened.
     if skyward_crypto::data::empty() {
-        match stage::make() {
+        match stage::make(false) {
             Ok(true) => {
                 skyward_sys::kmsg("the data partition holds nothing, so the phone's memory stands in for its storage until a system makes it")?;
                 let said = app.state.lang.pick([
@@ -2402,7 +2402,7 @@ pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, r
                         "Data has a new filesystem; the system makes its key when it next starts",
                     ]);
                     app.notice(said, monotonic_ms());
-                    match stage::make() {
+                    match stage::make(false) {
                         Ok(true) => skyward_sys::kmsg("the phone's memory stands in for its storage until a system makes the key")?,
                         Ok(false) => {}
                         Err(e) => skyward_sys::kmsg(&format!("the phone's memory could not stand in for its storage: {e:#}"))?,
@@ -2416,7 +2416,7 @@ pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, r
                     // The partition cannot be read, so nothing can be put in
                     // it: the memory stands in, and a package brought in there
                     // can still be flashed.
-                    if stage::make().unwrap_or(false) {
+                    if stage::make(false).unwrap_or(false) {
                         let said = app.state.lang.pick([
                             "data 打不开：内存暂作内部存储，刷机包可以放进去，重启后清空",
                             "data 打不開：記憶體暫作內部儲存，刷機包可以放進去，重新啟動後清空",

@@ -147,6 +147,10 @@ enum Cmd {
         /// Take it away again instead of showing it.
         #[arg(long)]
         off: bool,
+        /// Show it even where the data partition is open, over the phone's
+        /// own storage, for a look at it.
+        #[arg(long)]
+        force: bool,
     },
     /// Print what the installed system's partitions say to do to use the
     /// phone's keys, in order, and do none of it. A build of the hardware
@@ -333,11 +337,11 @@ fn main() -> Result<()> {
             }
         }
         #[cfg(target_os = "android")]
-        Cmd::Stage { off } => {
+        Cmd::Stage { off, force } => {
             if off {
                 stage::take()?;
                 println!("/sdcard is no longer the phone's memory");
-            } else if stage::make()? {
+            } else if stage::make(force)? {
                 println!("/sdcard is the phone's memory now: what is put there is gone at the next restart");
             } else {
                 println!("/sdcard already shows something else");

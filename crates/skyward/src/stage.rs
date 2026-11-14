@@ -32,22 +32,30 @@ const FOLDERS: [&str; 2] = ["Download", "Pictures/Screenshots"];
 /// number is a ceiling, not an asking: pages are taken as they are written.
 const LEAST: u64 = 8 << 30;
 
-/// Whether it is the memory that is shown at [`AT`] now.
+/// Whether it is the memory shown here that the pages are looking at, as this
+/// process knows it. Another process may have shown it, so [`shown`] tells
+/// from the mount table as well.
 static STAGED: AtomicBool = AtomicBool::new(false);
 
 /// The memory shown at [`AT`], where it was not before: `true` where it was
 /// shown now, `false` where the partition that should be there is open, or
-/// something else is already shown there.
-pub fn make() -> Result<bool> {
+/// something else is already shown there. `force` shows it over the phone's
+/// own storage too, for a look at it where the partition is open.
+pub fn make(force: bool) -> Result<bool> {
     if STAGED.load(Ordering::Relaxed) {
         return Ok(false);
     }
-    if mount::is_mount_point(Path::new(skyward_crypto::data::MOUNT))? {
+    if !force && mount::is_mount_point(Path::new(skyward_crypto::data::MOUNT))? {
         return Ok(false);
     }
     fs::create_dir_all(AT).with_context(|| format!("make {AT}"))?;
     if mount::is_mount_point(Path::new(AT))? {
-        return Ok(false);
+        // The phone's own storage is shown there, and it is only shown over
+        // where the caller says so outright.
+        if !force || shown() {
+            return Ok(false);
+        }
+        mount::umount_detach(Path::new(AT)).with_context(|| format!("take {} away first", AT))?;
     }
     let room = room();
     let options = ["mode=0777".to_string(), "nosuid".to_string(), "nodev".to_string(), format!("size={room}")];
@@ -64,7 +72,8 @@ pub fn make() -> Result<bool> {
 /// there is opened: a partition cannot be mounted over memory the page
 /// still holds a name for.
 pub fn take() -> Result<()> {
-    if !STAGED.swap(false, Ordering::Relaxed) {
+    let ours = STAGED.swap(false, Ordering::Relaxed) || shown();
+    if !ours {
         return Ok(());
     }
     if mount::is_mount_point(Path::new(AT))? {
@@ -74,6 +83,16 @@ pub fn take() -> Result<()> {
         mount::umount_detach(Path::new(AT)).with_context(|| format!("take the memory away from {AT}"))?;
     }
     Ok(())
+}
+
+/// Whether what is shown at [`AT`] is memory, as the mount table says: another
+/// process may have shown it, and one that ends does not take it away.
+fn shown() -> bool {
+    let Ok(table) = fs::read_to_string("/proc/mounts") else { return false };
+    table.lines().any(|line| {
+        let mut fields = line.split_whitespace();
+        matches!((fields.next(), fields.next(), fields.next()), (_, Some(at), Some("tmpfs")) if at == AT)
+    })
 }
 
 /// How much of the phone's memory can be spared: three quarters of what is
