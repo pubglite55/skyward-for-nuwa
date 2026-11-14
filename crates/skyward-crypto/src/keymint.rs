@@ -115,10 +115,7 @@ const TAG_PURPOSE: i32 = 536_870_913;
 const TAG_BLOCK_MODE: i32 = 536_870_916;
 const TAG_PADDING: i32 = 536_870_918;
 const TAG_MAC_LENGTH: i32 = 805_307_371;
-// Algorithm is a single enum where purpose, mode and padding repeat: the
-// high bits of the tag say which, and a key service reads a repeated one
-// where a single one is meant as no algorithm at all.
-const TAG_ALGORITHM: i32 = 268_435_458;
+const TAG_ALGORITHM: i32 = 536_870_914;
 const TAG_KEY_SIZE: i32 = 805_306_371;
 const TAG_APPLICATION_ID: i32 = -1_879_047_591;
 const TAG_NONCE: i32 = -1_879_047_191;

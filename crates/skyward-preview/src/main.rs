@@ -1532,32 +1532,32 @@ fn whole_page(app: &mut App, f: &Fonts, info: &DeviceInfo) -> Canvas {
     c
 }
 
-/// Xiaomi 17 Ultra by Leica as `skyward info` read it on 2026-10-18 (the
-/// config supplies the SoC name, panel and screen size).
+/// The Xiaomi 13 Pro this fork serves, as `skyward info` reads it (the
+/// config supplies the model, SoC name, panel and screen size).
 fn nezha(cfg: &DeviceConfig) -> DeviceInfo {
     DeviceInfo {
-        model: "Xiaomi 17 Ultra by Leica".into(),
+        model: cfg.device.model.clone(),
         codename: cfg.device.codename.clone(),
         soc: cfg.device.soc.clone(),
-        cpu: Cpu { cores: 8, max_khz: Some(4_608_000) },
-        ram_kib: 15_472_464,
+        cpu: Cpu { cores: 8, max_khz: Some(3_200_000) },
+        ram_kib: 11_500_000,
         panel: Some((cfg.display.width, cfg.display.height)),
         screen: cfg.display.diagonal,
-        os_version: Some("OS4.0.4.0.XPACNXM".into()),
-        android: Some("17".into()),
+        os_version: Some("OS3.0.312.0.WMBCNXM".into()),
+        android: Some("16".into()),
         locale: Some("zh-CN".into()),
-        security_patch: Some(PatchLevel { year: 2026, month: 10, day: 1 }),
-        kernel: "6.12.69-android16-6-g43b5ab7e247d-abogki561813157-4k".into(),
-        storage: Storage { total: 1_039_535_157_248, free: Some(620_652_802_048) },
+        security_patch: Some(PatchLevel { year: 2026, month: 8, day: 1 }),
+        kernel: "6.1.75-android14-11-g3b7b1b3f2e0a-ab12277321".into(),
+        storage: Storage { total: 512_110_190_592, free: Some(310_338_699_264) },
         battery: Some(Battery {
-            level: 95,
+            level: 92,
             charge: Charge::Charging,
-            temp: Some(350),
+            temp: Some(300),
             health: Some("Good".into()),
-            cycles: Some(300),
-            design: Some(6_800_000),
-            full: Some(6_543_000),
-            voltage: Some(4_442_000),
+            cycles: Some(219),
+            design: Some(4_820_000),
+            full: Some(4_706_000),
+            voltage: Some(4_352_000),
             // The recovery has no fast charging handshake with the charger.
             quick: false,
             plugged: true,

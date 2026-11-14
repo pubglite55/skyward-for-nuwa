@@ -210,22 +210,6 @@ pub fn make_key(service: &KeyMint, dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Ask the secure world for the key the data partition would be built with,
-/// and keep nothing of it: a phone whose key service refuses the request
-/// says so before any partition is written.
-#[cfg(target_os = "android")]
-pub fn try_key(service: &KeyMint) -> Result<usize> {
-    let bound = random(SECDISCARDABLE_BYTES)?;
-    let app_id = crate::keystore::secdiscardable(&bound);
-    let blob = match service.generate_key(Some(&app_id), true) {
-        Ok(blob) => blob,
-        Err(first) => service
-            .generate_key(Some(&app_id), false)
-            .with_context(|| format!("asked without rollback resistance after: {first:#}"))?,
-    };
-    Ok(blob.len())
-}
-
 /// Give `path` the mode the phone's own storage manager gives what it
 /// writes.
 #[cfg(target_os = "android")]
