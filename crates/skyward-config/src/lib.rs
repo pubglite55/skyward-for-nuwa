@@ -706,13 +706,11 @@ mod tests {
         assert_eq!(cfg.device.build_patch.as_deref(), Some("2099-12-31"), "and its patch level, which the vendor build reports as well");
         assert_eq!(cfg.stock.as_ref().map(|s| s.version.as_str()), Some("OS3.0.312.0.WMBCNXM"));
         let paths: Vec<&str> = cfg.services.iter().map(|s| s.path.as_str()).collect();
-        for needed in [
-            "/vendor/bin/qseecomd",
-            "/vendor/bin/hw/android.hardware.security.keymint-service-qti",
-            "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti",
-        ] {
-            assert!(paths.contains(&needed), "{needed} is part of the secure stack");
-        }
+        assert_eq!(
+            paths,
+            ["/vendor/bin/sh", "/odm/bin/touch_report", "/odm/bin/touchsensor"],
+            "the programs that use the phone's keys are read from its own partitions"
+        );
     }
 
     #[test]
