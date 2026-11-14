@@ -47,7 +47,12 @@ fn names(steps: &[Step]) -> Vec<&str> {
 /// seen started in this order on the phone, in its kernel log.
 #[test]
 fn nuwa_s_programs_are_found_in_the_order_they_were_started_on_the_phone() {
-    let steps = secure::steps(&phone("nuwa", &[("ro.boot.hardware", "qcom")])).unwrap();
+    let properties = [
+        ("ro.boot.hardware", "qcom"),
+        ("ro.boot.product.vendor.sku", "kalama"),
+        ("ro.boot.product.hardware.sku", "nuwa"),
+    ];
+    let steps = secure::steps(&phone("nuwa", &properties)).unwrap();
     assert_eq!(
         names(&steps),
         [

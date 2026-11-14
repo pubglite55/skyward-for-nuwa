@@ -527,8 +527,9 @@ pub fn mount(cx: &Ctx) -> Frame {
     Frame::new(t, fit(c, t, bottom), out, l.pick(["挂载", "掛載", "Mount"]), top)
 }
 
-/// Who made the recovery, as the About page names them under its version.
-const AUTHOR: &str = "© 2026 Kirk Lin";
+/// Who made the recovery, as the About page names them under its version:
+/// upstream's author first, then the port that carries it to this phone.
+const AUTHOR: &str = "© 2026 Kirk Lin · xiuxiu391 (nuwa)";
 
 /// About this device, modelled on the stock「我的设备」: the wordmark, the
 /// version and its author over a moving colour field, and the summary,
@@ -3812,7 +3813,8 @@ const LICENSE_NOTICE: [&str; 2] = [
 發布 Skyward 是希望它有用，但不附帶任何擔保，也不擔保其適銷性或適用於特定用途。詳見 GNU 通用公眾授權條款。",
 ];
 
-const LICENSE_ORIGINAL: &str = "Skyward\nCopyright (C) 2026 Kirk Lin\n\n\
+const LICENSE_ORIGINAL: &str = "Skyward\nCopyright (C) 2026 Kirk Lin\n\
+Port to the Xiaomi 13 Pro (nuwa) and its upkeep: xiuxiu391, 2026\n\n\
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.\n\n\
 This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.\n\n\
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.";
