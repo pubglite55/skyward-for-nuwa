@@ -150,6 +150,14 @@ pub struct Opened {
 fn open(service: &KeyMint) -> Result<Opened> {
     let entries = skyward_block::fstab::read(MOUNT)?;
     let keyed = keyed_entry(&entries)?;
+    // A partition a factory reset emptied holds nothing to open, and no key
+    // is kept for it until the system builds it again: saying that is better
+    // than the key it cannot find.
+    if holds_nothing(Path::new(&keyed.device)) {
+        bail!(
+            "the data partition is empty: it was erased, and the system builds it again when it next starts. Start the system once, then come back."
+        );
+    }
     let mapped = map(service, keyed)?;
     match mount_data(&entries, keyed, &mapped) {
         Ok((checked, filesystem)) => Ok(Opened { mapped, filesystem, checked }),
@@ -157,6 +165,21 @@ fn open(service: &KeyMint) -> Result<Opened> {
             Ok(()) => Err(e),
             Err(r) => Err(e.context(format!("removing {MAPPED} afterwards failed too: {r:#}"))),
         },
+    }
+}
+
+/// Whether `device` holds nothing at all: the first block of it is zeroes,
+/// as a partition a factory reset erased holds, and as one the system has
+/// not built yet holds. A partition the storage hardware encrypts whole
+/// reads as ciphertext, which is never all zeroes, so this tells an empty
+/// partition from one whose key is missing.
+fn holds_nothing(device: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(device) else { return false };
+    let mut head = [0u8; 4096];
+    match file.read_exact(&mut head) {
+        Ok(()) => head.iter().all(|byte| *byte == 0),
+        Err(_) => false,
     }
 }
 
@@ -748,8 +771,21 @@ mod tests {
     }
 
     #[test]
-    fn the_phones_own_words_for_the_cipher_become_the_kernels() {
-        let e = entry("metadata_encryption=aes-256-xts:wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption");
+    fn a_partition_of_zeroes_holds_nothing_to_open() {
+        let dir = std::env::temp_dir().join(format!("skyward-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let empty = dir.join("empty");
+        std::fs::write(&empty, [0u8; 8192]).unwrap();
+        assert!(holds_nothing(&empty), "a partition of zeroes holds nothing");
+        let held = dir.join("held");
+        std::fs::write(&held, [7u8; 8192]).unwrap();
+        assert!(!holds_nothing(&held), "one holding anything holds something");
+        assert!(!holds_nothing(&dir.join("missing")), "and one that cannot be read is not taken for empty");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_phones_own_words_for_the_cipher_become_the_kernels() {        let e = entry("metadata_encryption=aes-256-xts:wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption");
         assert_eq!(Encryption::of(&e).unwrap(), Encryption { cipher: "aes-xts-plain64".into(), wrapped: true });
         let plain = entry("metadata_encryption=adiantum");
         assert_eq!(Encryption::of(&plain).unwrap(), Encryption { cipher: "xchacha12,aes-adiantum-plain64".into(), wrapped: false });
