@@ -210,11 +210,14 @@ fn name(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, tile: &Tile, rect: Rect) 
     let said = if tile.counted { tile.name } else { l.pick(["空闲", "空閒", "Free"]) };
     let both = rect.h >= dp(58.0) && room >= dp(64.0);
     // A name is written whole or not at all: a smaller size once, then the
-    // colour alone, which says more than `system…` does.
+    // colour alone, which says more than `system…` does. The room asked for
+    // is a shade under what there is, the drawn run being measured a little
+    // wider than the sum of its glyphs.
+    let fits = |c: &Canvas, px: f32| c.text_width(&f.heading, said, px) <= room - dp(6.0);
     let mut px = if both { dp(15.0) } else { dp(12.0) };
-    if c.text_width(&f.heading, said, px) > room {
-        px = dp(10.5);
-        if c.text_width(&f.heading, said, px) > room {
+    if !fits(c, px) {
+        px = dp(10.0);
+        if !fits(c, px) {
             return;
         }
     }
