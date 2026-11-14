@@ -175,8 +175,8 @@ pub const LOG: &str = "/skyward/run/recovery.log";
 /// it.
 static KEPT: OnceLock<Mutex<File>> = OnceLock::new();
 
-/// Whether the file [`keep_log`] opened was there already, an earlier run of
-/// the recovery service having kept its log in it.
+/// Whether the file [`keep_log`] opened was there already, an earlier run
+/// of the recovery service having kept its log in it.
 static RUNS_AGAIN: OnceLock<bool> = OnceLock::new();
 
 /// Keep every line [`kmsg`] writes from now on in the file at `path` as

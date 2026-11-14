@@ -708,7 +708,7 @@ struct Pending {
 }
 
 /// Start installing the package the system asked for.
-fn install_asked(cfg: &DeviceConfig, app: &App, pending: Pending) -> Result<Installer> {
+fn install_asked(programs: &[Service], app: &App, pending: Pending) -> Result<Installer> {
     if pending.needs == Needs::Cache {
         let cache = wipe::cache()?.context("the phone has no cache partition")?;
         let at = Path::new(&cache.mount_point);
@@ -717,7 +717,7 @@ fn install_asked(cfg: &DeviceConfig, app: &App, pending: Pending) -> Result<Inst
             mount::mount_ro(Path::new(&fstab::device(&cache)?), at)?;
         }
     }
-    Installer::asked(pending.package, pending.retry, detach(cfg.services.clone()), install_options(app))
+    Installer::asked(pending.package, pending.retry, detach(programs.to_vec()), install_options(app))
 }
 
 /// Where a reboot rescue asked for goes: the target, and whether it is
@@ -1171,7 +1171,7 @@ fn wait(fds: &[i32], timeout_ms: i32) -> Result<()> {
 
 /// Run the pages. What `request`, read from misc, asks for decides the
 /// first of them; asking for nothing, they start at `start`.
-pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, start: Screen, dump: Option<&Path>) -> Result<()> {
+pub fn run(cfg: &DeviceConfig, programs: &[Service], font: &Path, mono: &Path, request: bcb::Request, start: Screen, dump: Option<&Path>) -> Result<()> {
     if cfg.display.density == 0 {
         return Err(anyhow!("{}: [display] density is required to lay out the UI", cfg.device.codename));
     }
@@ -1270,7 +1270,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     let mut arriving = Some(Incoming::Arrived);
     // The mount page shows the partitions as they are when it opens and
     // after each change; why they cannot be read is the page's to say.
-    let mounts = || read_mounts(&cfg.services).map_err(|e| format!("{e:#}"));
+    let mounts = || read_mounts(programs).map_err(|e| format!("{e:#}"));
 
     let mut screen = Canvas::new(w, h);
     // A page sliding over another draws on three screens' worth of canvas
@@ -1434,7 +1434,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         decryptor = Some(Decryptor::start(decrypt::Job::Open)?);
                         pending = Some(wanted);
                     }
-                    Needs::Nothing | Needs::Cache => installer = Some(install_asked(cfg, &app, wanted)?),
+                    Needs::Nothing | Needs::Cache => installer = Some(install_asked(programs, &app, wanted)?),
                 }
             }
         }
@@ -2423,7 +2423,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         app.asked_locked(user, now);
                         pending = Some(wanted);
                     }
-                    _ => installer = Some(install_asked(cfg, &app, wanted)?),
+                    _ => installer = Some(install_asked(programs, &app, wanted)?),
                 }
             }
         }
