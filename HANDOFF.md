@@ -4,7 +4,8 @@
 
 - 仓库：https://github.com/pubglite55/skyward-for-nuwa
 - 上游：https://github.com/kirklin/skyward（本仓库已合并 **0.3.0**，代码基线 0.3.0）
-- 当前最新 Release：**nuwa-v1.9**（2026-11-14，= 上游 0.3.0 + 本 fork 自有功能）；真机已验证启动、密钥链、解密、WLAN；安装 / 备份 / 双系统未在合并后复测。
+- 当前最新 Release：**nuwa-v1.9**（2026-11-14 重发，= 上游 0.3.0 + 本 fork 自有功能 + 密钥链容错 + 清理 + 署名）；真机已验证启动、密钥链、解密、WLAN、缺程序时的容错；安装 / 备份 / 双系统未在合并后复测。
+- 署名：上游 **Kirk Lin** / 本移植 **xiuxiu391**，README（中英）、关于页（`AUTHOR`）、许可证页（`LICENSE_ORIGINAL`）、发布说明都已写上。
 - 当前发布分支 `fork/main` 头：与本轮发布同一提交；本地工作分支 `upstream-merge`
 - 设备：小米 13 Pro，代号 **nuwa**，型号 2210132C，SM8550（骁龙 8 Gen 2）
 
@@ -299,7 +300,15 @@ skyward-pack recovery --stock stock/recovery.img --binary .../skyward --system-i
 | `crates/skyward-ui`（`app`/`settings`/`pages`/`search`） | 文件管理器排序：高级 → 文件排序，可按名称 / 大小 / 修改时间，升降序，文件夹置顶；排序在界面侧完成，改选即重排已打开的列表，选择写入设置文件（`sort`），下次启动保留 |
 | `crates/skyward-net/src/download.rs`、`crates/skyward/src/updates.rs`、`skyward-ui`、`crates/skyward/src/ui.rs` | 新增「网络下载」：高级 → 网络下载，输入 `http://` / `https://` 直链，按回车即下到内部存储 `Download/`；支持 `Range` 续传、可停止（已下部分保留，再下同一地址接着下）、同名文件自动加序号不覆盖。为此给下载层加了「无摘要」模式（`Sum::None`，手输地址不带校验值）与文件名推导（`name_from` / `free_name`） |
 
-### 2026-11-14 下午 · 合并上游 0.3.0（programs / binder / omapi）
+### 2026-11-14 傍晚 · 密钥链容错、清理、署名，重发 v1.9
+
+- **容错**：`services::start` 原本遇到第一个起不来的程序就 `bail!`，`keys::start` 逐步调它，于是缺一个就整条链停住（data 解不开，日志只有一行）。改成「每个都试，记第一个原因，最后统一报告」，`bring_up` 里 `services::start` 与 `keys::start` 失败只记日志、继续往下（否则密钥链仍被跳过）。
+- **真机验证方法**（可复用）：把 `devices/nuwa.toml` 里第一个服务路径改成不存在的 `/vendor/bin/not-on-this-phone`，编一版刷进去，看 `ps` 里 `touch_report`/`touchsensor` 是否仍起来、`dmesg` 是否有 `left out of the chain`、`/data` 是否在 10 秒内挂上。验完还原配置再提交（临时提交已压掉）。
+- **清理**：本地 13 个旧分支、远端 5 个旧分支全删（远端只剩 `main`）；移除与 nuwa 无关的远端 `aurora-pr`、`guobao`；删掉其它 20 个机型的描述语料（13 828 个文件、27 MB），只留 `tests/described/nuwa`，`phones` 测试改为核对 nuwa 的六个密钥程序与顺序（需要 `ro.boot.product.vendor.sku=kalama` 才会读 `manifest_kalama.xml`）。
+- **署名**：README 中英、「关于」页 `AUTHOR`（`© 2026 Kirk Lin · xiuxiu391 (nuwa)`）、许可证页 `LICENSE_ORIGINAL`、发布说明。
+- **重发**：删掉旧 `nuwa-v1.9` 发布与标签，在新提交上重打；`nuwa-v1.8` 仍是上一版可回退。
+
+## 2026-11-14 下午 · 合并上游 0.3.0（programs / binder / omapi）
 
 - 以 `git merge v0.3.0` 整块合入，保留本 fork 的全部自有功能。
 - 冲突只有 13 个文件，逐个处理：README 留我们；binder 三个文件、`skyward-sys`、`services.rs`、`secure.rs`、`ui.rs` 取上游（ui 另把 `install_asked`/`run`/`read_mounts` 的 `programs` 参数补回我们的版本）；`skyward-config` 取我们（去掉上游对已删机型的测试）；`main.rs` 一处冲突取上游。
